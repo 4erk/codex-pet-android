@@ -18,7 +18,7 @@ object DiagnosticsExporter {
         pet: PetVisual?,
     ): String {
         val root = JSONObject()
-        root.put("schemaVersion", 1)
+        root.put("schemaVersion", 2)
         root.put("exportedAt", System.currentTimeMillis())
         root.put("sanitized", true)
         root.put("app", JSONObject()
@@ -42,10 +42,18 @@ object DiagnosticsExporter {
         root.put("settings", JSONObject()
             .put("sourcePackage", settings.sourcePackage)
             .put("overlayEnabled", settings.overlayEnabled)
+            .put("petVisible", settings.petVisible)
             .put("autoStart", settings.autoStart)
             .put("snapEnabled", settings.snapEnabled)
             .put("animationsEnabled", settings.animationsEnabled)
+            .put("animationSpeed", settings.animationSpeed.toDouble())
             .put("petSizeDp", settings.petSizeDp)
+            .put("completedVisibleSeconds", settings.completedVisibleSeconds)
+            .put("panelPinned", settings.panelPinned)
+            .put("autoTaskBubblesEnabled", settings.autoTaskBubblesEnabled)
+            .put("attentionBubblesEnabled", settings.attentionBubblesEnabled)
+            .put("chatMessageBubblesEnabled", settings.chatMessageBubblesEnabled)
+            .put("completionBubblesEnabled", settings.completionBubblesEnabled)
             .putNullable("lastPetHash", settings.lastPetHash)
             .putNullable("lastPetUpdatedAt", settings.lastPetUpdatedAt)
             .putNullable("lastPetAssetSource", settings.lastPetAssetSource)
@@ -57,6 +65,13 @@ object DiagnosticsExporter {
                 .putNullable("sourcePackage", settings.lastPetSourcePackage)
                 .put("updatedAt", it.updatedAt)
                 .put("hasMeaningfulTransparency", it.hasMeaningfulTransparency)
+                .put("frameSequenceCount", it.frameSequences.size)
+                .put("animationStates", JSONArray().apply {
+                    it.frameSequences.keys.forEach { state -> put(state.name) }
+                })
+                .put("lookDirectionCount", it.lookDirections.size)
+                .put("frameWidth", it.bitmap.width)
+                .put("frameHeight", it.bitmap.height)
         } ?: JSONObject.NULL)
         root.put("notifications", JSONArray().apply {
             snapshots.forEach { put(it.toSanitizedJson()) }
@@ -81,6 +96,7 @@ object DiagnosticsExporter {
         .putNullable("groupKeyHash", groupKey?.let(::hash))
         .putNullable("shortcutIdHash", shortcutId?.let(::hash))
         .putNullable("channelId", channelId)
+        .put("notificationRole", notificationRole)
         .put("extraKeys", JSONArray(extraKeys))
         .put("extras", JSONObject().apply {
             extras.forEach { (key, value) ->

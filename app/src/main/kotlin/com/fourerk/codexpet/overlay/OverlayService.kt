@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import com.fourerk.codexpet.R
 import com.fourerk.codexpet.app.AppGraph
 import com.fourerk.codexpet.app.MainActivity
+import com.fourerk.codexpet.settings.AppSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,19 +34,22 @@ class OverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_HIDE) {
-            serviceScope.launch { AppGraph.settings.setOverlayEnabled(false) }
-            stopOverlay()
-            return START_NOT_STICKY
-        }
         if (!android.provider.Settings.canDrawOverlays(this)) {
             AppGraph.diagnostics.error("Overlay service started without SYSTEM_ALERT_WINDOW grant")
             stopOverlay()
             return START_NOT_STICKY
         }
 
-        startForegroundCompat()
+        startForegroundCompat(AppGraph.settings.settings.value)
         startCollectors()
+        when (intent?.action) {
+            ACTION_HIDE -> serviceScope.launch { AppGraph.settings.setPetVisible(false) }
+            ACTION_SHOW -> serviceScope.launch { AppGraph.settings.setPetVisible(true) }
+            ACTION_TOGGLE_AUTO_BUBBLES -> serviceScope.launch {
+                val enabled = AppGraph.settings.settings.value.autoTaskBubblesEnabled
+                AppGraph.settings.setAutoTaskBubblesEnabled(!enabled)
+            }
+        }
         return START_STICKY
     }
 
@@ -71,6 +75,7 @@ class OverlayService : Service() {
                     if (!settings.overlayEnabled) {
                         stopOverlay()
                     } else {
+                        startForegroundCompat(settings)
                         controller.applySettings(settings)
                         controller.show()
                     }
@@ -82,29 +87,57 @@ class OverlayService : Service() {
         }
     }
 
-    private fun startForegroundCompat() {
+    private fun startForegroundCompat(settings: AppSettings) {
         val openIntent = PendingIntent.getActivity(
             this,
             1,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val hideIntent = PendingIntent.getService(
+        val visibilityIntent = PendingIntent.getService(
             this,
             2,
-            Intent(this, OverlayService::class.java).setAction(ACTION_HIDE),
+            Intent(this, OverlayService::class.java).setAction(
+                if (settings.petVisible) ACTION_HIDE else ACTION_SHOW,
+            ),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val bubblesIntent = PendingIntent.getService(
+            this,
+            3,
+            Intent(this, OverlayService::class.java).setAction(ACTION_TOGGLE_AUTO_BUBBLES),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val stateText = getString(
+            R.string.overlay_notification_state,
+            getString(if (settings.petVisible) R.string.pet_visible else R.string.pet_hidden),
+            getString(
+                if (settings.autoTaskBubblesEnabled) R.string.auto_bubbles_enabled
+                else R.string.auto_bubbles_disabled,
+            ),
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.overlay_notification_title))
-            .setContentText(getString(R.string.overlay_notification_text))
+            .setContentText(stateText)
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(R.drawable.ic_notification, getString(R.string.hide_pet), hideIntent)
+            .addAction(
+                R.drawable.ic_notification,
+                getString(if (settings.petVisible) R.string.hide_pet else R.string.show_pet),
+                visibilityIntent,
+            )
+            .addAction(
+                R.drawable.ic_notification,
+                getString(
+                    if (settings.autoTaskBubblesEnabled) R.string.disable_auto_bubbles
+                    else R.string.enable_auto_bubbles,
+                ),
+                bubblesIntent,
+            )
             .build()
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
@@ -138,6 +171,8 @@ class OverlayService : Service() {
     companion object {
         const val ACTION_START = "com.fourerk.codexpet.action.START_OVERLAY"
         const val ACTION_HIDE = "com.fourerk.codexpet.action.HIDE_OVERLAY"
+        const val ACTION_SHOW = "com.fourerk.codexpet.action.SHOW_OVERLAY"
+        const val ACTION_TOGGLE_AUTO_BUBBLES = "com.fourerk.codexpet.action.TOGGLE_AUTO_BUBBLES"
         private const val CHANNEL_ID = "codex_pet_overlay"
         private const val NOTIFICATION_ID = 4101
     }

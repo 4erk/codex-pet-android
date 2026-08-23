@@ -9,6 +9,11 @@ import com.fourerk.codexpet.diagnostics.SanitizedText
 import com.fourerk.codexpet.pet.PetAssetProvider
 import com.fourerk.codexpet.pet.PetInspection
 import com.fourerk.codexpet.task.CodexTask
+import com.fourerk.codexpet.task.TaskKind
+import com.fourerk.codexpet.task.TaskAnimationCue
+import com.fourerk.codexpet.task.TaskAnimationDecision
+import com.fourerk.codexpet.task.TaskAnimationCueResolver
+import com.fourerk.codexpet.task.CueSignalSource
 import com.fourerk.codexpet.task.TaskProgress
 import com.fourerk.codexpet.task.TaskSignals
 import com.fourerk.codexpet.task.TaskStatusResolver
@@ -42,19 +47,31 @@ class NotificationParser {
         val latestMessage = messagingStyle?.messages?.lastOrNull()?.text?.toString()
         val title = firstText(
             extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE),
+            extras.getCharSequence(Notification.EXTRA_TITLE_BIG),
             extras.getCharSequence(Notification.EXTRA_TITLE),
             notification.shortcutId,
             if (groupSummary) "ChatGPT notification group" else "Codex task",
         ).orEmpty().singleLine(120)
         val summary = firstText(
             extras.getCharSequence(Notification.EXTRA_BIG_TEXT),
-            extras.getCharSequence(Notification.EXTRA_TEXT),
             latestMessage,
-            inboxLines.lastOrNull(),
-        )?.singleLine(360)
-        val fallbackText = listOfNotNull(title, summary, inboxLines.joinToString(" "))
+            extras.getCharSequence(Notification.EXTRA_TEXT),
+            inboxLines.takeIf { it.isNotEmpty() }?.joinToString("\n"),
+        )?.multiLine(MAX_TASK_TEXT)
+        val detail = firstText(
+            extras.getCharSequence(EXTRA_SHORT_CRITICAL_TEXT),
+            extras.getCharSequence(Notification.EXTRA_SUB_TEXT),
+            extras.getCharSequence(Notification.EXTRA_INFO_TEXT),
+        )?.singleLine(160)
+        val notificationRole = ChatGptNotificationClassifier.classify(notification)
+        val kind = when (notificationRole) {
+            ChatGptNotificationRole.CODEX_TASK -> TaskKind.TASK
+            ChatGptNotificationRole.CODEX_AVATAR -> TaskKind.BUBBLE_CONTROLLER
+            ChatGptNotificationRole.CHAT_MESSAGE -> TaskKind.CHAT_MESSAGE
+        }
+        val fallbackText = listOfNotNull(title, summary, detail, inboxLines.joinToString(" "))
             .joinToString(" ")
-            .take(1_000)
+            .take(MAX_TASK_TEXT)
         val status = TaskStatusResolver.resolve(
             TaskSignals(
                 progress = progress,
@@ -64,6 +81,11 @@ class NotificationParser {
                 fallbackText = fallbackText,
             ),
         )
+        val animationDecision = if (kind == TaskKind.CHAT_MESSAGE) {
+            TaskAnimationDecision(TaskAnimationCue.MESSAGE_RECEIVED, CueSignalSource.NOTIFICATION_ROLE)
+        } else {
+            TaskAnimationCueResolver.resolve(status, fallbackText)
+        }
         val taskProgress = if (progress != null || progressMax != null || progressIndeterminate) {
             TaskProgress(
                 value = progress ?: 0,
@@ -74,11 +96,22 @@ class NotificationParser {
             null
         }
         val bubble = notification.bubbleMetadata
-        val taskId = notification.shortcutId
-            ?.takeIf(String::isNotBlank)
-            ?.let { "shortcut:$it" }
-            ?: "notification:${sbn.key}"
+        val taskId = if (kind == TaskKind.BUBBLE_CONTROLLER) {
+            "avatar:${sbn.key}"
+        } else {
+            notification.shortcutId
+                ?.takeIf(String::isNotBlank)
+                ?.let { "shortcut:$it" }
+                ?: "notification:${sbn.key}"
+        }
         val notes = buildList {
+            if (kind == TaskKind.BUBBLE_CONTROLLER) {
+                add("Avatar notification is retained for pet/deep-link data but hidden from the task list")
+            }
+            if (kind == TaskKind.CHAT_MESSAGE) {
+                add("Regular ChatGPT notification is shown as a chat message and never counted as a Codex task")
+            }
+            add("Animation cue: ${animationDecision.cue} (${animationDecision.source})")
             if (groupSummary) add("FLAG_GROUP_SUMMARY is set; item is retained as an aggregate, not expanded into invented tasks")
             if (inboxLines.size > 1) add("Inbox-style lines detected: ${inboxLines.size}; lines are not treated as independent tasks without stable IDs")
             addAll(petInspection.notes)
@@ -97,6 +130,7 @@ class NotificationParser {
             groupKey = sbn.groupKey,
             shortcutId = notification.shortcutId,
             channelId = notification.channelId,
+            notificationRole = notificationRole.name,
             extraKeys = extras.keySet().sorted(),
             extras = DIAGNOSTIC_TEXT_KEYS.associateWith { key ->
                 sanitize(extras.getCharSequence(key), includeDebugText)
@@ -141,6 +175,10 @@ class NotificationParser {
                 bubbleIntent = bubble?.intent,
                 sourceNotificationKey = sbn.key,
                 groupKey = sbn.groupKey,
+                kind = kind,
+                detail = detail,
+                animationCue = animationDecision.cue,
+                animationCueSource = animationDecision.source,
             ),
             snapshot = snapshot,
         )
@@ -166,6 +204,16 @@ class NotificationParser {
     private fun String.singleLine(maxLength: Int): String =
         replace(Regex("\\s+"), " ").trim().take(maxLength)
 
+    private fun String.multiLine(maxLength: Int): String =
+        replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .lineSequence()
+            .map { it.replace(Regex("[\\t ]+"), " ").trim() }
+            .joinToString("\n")
+            .replace(Regex("\n{3,}"), "\n\n")
+            .trim()
+            .take(maxLength)
+
     private fun android.os.Bundle.optionalInt(key: String): Int? =
         if (containsKey(key)) getInt(key) else null
 
@@ -174,13 +222,18 @@ class NotificationParser {
 
     private companion object {
         const val MAX_DEBUG_TEXT = 2_000
+        const val MAX_TASK_TEXT = 4_000
+        const val EXTRA_SHORT_CRITICAL_TEXT = "android.shortCriticalText"
         val DIAGNOSTIC_TEXT_KEYS = listOf(
             Notification.EXTRA_TITLE,
+            Notification.EXTRA_TITLE_BIG,
             Notification.EXTRA_TEXT,
+            Notification.EXTRA_SUMMARY_TEXT,
             Notification.EXTRA_SUB_TEXT,
             Notification.EXTRA_BIG_TEXT,
             Notification.EXTRA_INFO_TEXT,
             Notification.EXTRA_CONVERSATION_TITLE,
+            EXTRA_SHORT_CRITICAL_TEXT,
         )
     }
 }

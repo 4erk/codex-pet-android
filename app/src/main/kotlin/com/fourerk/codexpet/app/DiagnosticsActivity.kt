@@ -118,7 +118,7 @@ class DiagnosticsActivity : AppCompatActivity() {
         }
         addView(label("${item.event} · id=${item.id}", 16f, Color.WHITE, true))
         addView(label(
-            "key=${item.key}\npostTime=${item.postTime}\nflags=${item.flags}\ncategory=${item.category}\ngroup=${item.group}\ngroupKey=${item.groupKey}\nshortcutId=${item.shortcutId}\nchannelId=${item.channelId}\nstyle=${item.styleClass}",
+            "key=${item.key}\npostTime=${item.postTime}\nflags=${item.flags}\ncategory=${item.category}\ngroup=${item.group}\ngroupKey=${item.groupKey}\nshortcutId=${item.shortcutId}\nchannelId=${item.channelId}\nrole=${item.notificationRole}\nstyle=${item.styleClass}",
             11f,
             0xFFB8C0C6.toInt(),
         ))

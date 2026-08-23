@@ -29,6 +29,8 @@ import com.fourerk.codexpet.pet.PetVisual
 import com.fourerk.codexpet.settings.AppSettings
 import com.fourerk.codexpet.settings.LongPressAction
 import com.fourerk.codexpet.system.SystemAccess
+import com.fourerk.codexpet.task.TaskKind
+import com.fourerk.codexpet.task.isCodexTask
 import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -50,6 +52,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var autoStartSwitch: SwitchMaterial
     private lateinit var completedLabel: TextView
     private lateinit var completedSeek: SeekBar
+    private lateinit var panelPinSwitch: SwitchMaterial
+    private lateinit var autoTaskBubblesSwitch: SwitchMaterial
+    private lateinit var attentionBubblesSwitch: SwitchMaterial
+    private lateinit var chatMessageBubblesSwitch: SwitchMaterial
+    private lateinit var completionBubblesSwitch: SwitchMaterial
     private lateinit var longPressSpinner: Spinner
     private var bindingSettings = false
 
@@ -63,7 +70,12 @@ class MainActivity : AppCompatActivity() {
             AppGraph.pets.importManual(uri)
                 .onSuccess { pet ->
                     val warning = if (pet.hasMeaningfulTransparency) "" else " Изображение почти непрозрачное."
-                    toast("Питомец импортирован.$warning")
+                    val mode = if (pet.frameSequences.isNotEmpty()) {
+                        "Pet pack импортирован: ${pet.frameSequences.size} анимаций."
+                    } else {
+                        "Изображение питомца импортировано."
+                    }
+                    toast("$mode$warning")
                 }
                 .onFailure { toast("Импорт не удался: ${it.message.orEmpty()}") }
         }
@@ -94,6 +106,16 @@ class MainActivity : AppCompatActivity() {
         val statusCard = card("Первый запуск").apply {
             addView(statusText)
             addView(action("1. Доступ к уведомлениям") { SystemAccess.openNotificationListenerSettings(this@MainActivity) })
+            if (Build.VERSION.SDK_INT >= 33) {
+                addView(text(
+                    "Если MagicOS пишет «Есть ограничения»: откройте сведения о Codex Pet, нажмите ⋮ и выберите «Разрешить настройки с ограниченным доступом».",
+                    12f,
+                    0xFFB8C0C6.toInt(),
+                ))
+                addView(action("Открыть сведения о Codex Pet") {
+                    SystemAccess.openAppDetails(this@MainActivity)
+                })
+            }
             addView(action("2. Отображение поверх приложений") { SystemAccess.openOverlaySettings(this@MainActivity) })
             if (Build.VERSION.SDK_INT >= 33) {
                 addView(action("3. Уведомления Codex Pet") {
@@ -118,9 +140,14 @@ class MainActivity : AppCompatActivity() {
             addView(action("Обновить из notifications") {
                 ChatGptNotificationListener.refresh(this@MainActivity)
             })
-            addView(action("Импортировать вручную (fallback)") {
+            addView(action("Импортировать оригинальный pet pack / изображение") {
                 importPet.launch(arrayOf("image/png", "image/webp", "image/*"))
             })
+            addView(text(
+                "Pet pack: PNG/WebP 8×9 или 8×11, ячейка 192×208; также поддерживается 2×.",
+                12f,
+                0xFF8F989F.toInt(),
+            ))
         }, cardParams())
 
         sourcePackage = EditText(this).apply {
@@ -129,14 +156,19 @@ class MainActivity : AppCompatActivity() {
             hint = "com.openai.chatgpt"
             isSingleLine = true
         }
-        sizeLabel = text("Размер: 88 dp", 13f, Color.WHITE)
+        sizeLabel = text("Размер: 72 dp", 13f, Color.WHITE)
         sizeSeek = SeekBar(this).apply { max = 112 }
         snapSwitch = toggle("Snap к ближайшему краю")
-        animationSwitch = toggle("Transform-анимация питомца")
+        animationSwitch = toggle("Анимации оригинального pet pack")
         speedLabel = text("Скорость анимации: 1.00×", 13f, Color.WHITE)
         speedSeek = SeekBar(this).apply { max = 150 }
         completedLabel = text(completedVisibleText(5), 13f, Color.WHITE)
         completedSeek = SeekBar(this).apply { max = 30 }
+        panelPinSwitch = toggle("Закреплять панель задач")
+        autoTaskBubblesSwitch = toggle("Автоматически показывать текущие задачи")
+        attentionBubblesSwitch = toggle("Показывать ошибки, потерю связи и ожидание ответа")
+        chatMessageBubblesSwitch = toggle("Показывать сообщения из других чатов ChatGPT")
+        completionBubblesSwitch = toggle("Показывать завершение задачи")
         autoStartSwitch = toggle("Запускать после перезагрузки")
         longPressSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(
@@ -162,6 +194,11 @@ class MainActivity : AppCompatActivity() {
             addView(speedSeek)
             addView(completedLabel)
             addView(completedSeek)
+            addView(panelPinSwitch)
+            addView(autoTaskBubblesSwitch)
+            addView(attentionBubblesSwitch)
+            addView(chatMessageBubblesSwitch)
+            addView(completionBubblesSwitch)
             addView(autoStartSwitch)
             addView(text("Долгое нажатие", 12f, 0xFF8F989F.toInt()))
             addView(longPressSpinner)
@@ -214,6 +251,21 @@ class MainActivity : AppCompatActivity() {
         autoStartSwitch.setOnCheckedChangeListener { _, checked ->
             if (!bindingSettings) lifecycleScope.launch { AppGraph.settings.setAutoStart(checked) }
         }
+        panelPinSwitch.setOnCheckedChangeListener { _, checked ->
+            if (!bindingSettings) lifecycleScope.launch { AppGraph.settings.setPanelPinned(checked) }
+        }
+        autoTaskBubblesSwitch.setOnCheckedChangeListener { _, checked ->
+            if (!bindingSettings) lifecycleScope.launch { AppGraph.settings.setAutoTaskBubblesEnabled(checked) }
+        }
+        attentionBubblesSwitch.setOnCheckedChangeListener { _, checked ->
+            if (!bindingSettings) lifecycleScope.launch { AppGraph.settings.setAttentionBubblesEnabled(checked) }
+        }
+        chatMessageBubblesSwitch.setOnCheckedChangeListener { _, checked ->
+            if (!bindingSettings) lifecycleScope.launch { AppGraph.settings.setChatMessageBubblesEnabled(checked) }
+        }
+        completionBubblesSwitch.setOnCheckedChangeListener { _, checked ->
+            if (!bindingSettings) lifecycleScope.launch { AppGraph.settings.setCompletionBubblesEnabled(checked) }
+        }
         longPressSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
                 if (bindingSettings) return
@@ -246,6 +298,11 @@ class MainActivity : AppCompatActivity() {
         speedLabel.text = getString(R.string.animation_speed_format, settings.animationSpeed)
         completedSeek.progress = settings.completedVisibleSeconds
         completedLabel.text = completedVisibleText(settings.completedVisibleSeconds)
+        panelPinSwitch.isChecked = settings.panelPinned
+        autoTaskBubblesSwitch.isChecked = settings.autoTaskBubblesEnabled
+        attentionBubblesSwitch.isChecked = settings.attentionBubblesEnabled
+        chatMessageBubblesSwitch.isChecked = settings.chatMessageBubblesEnabled
+        completionBubblesSwitch.isChecked = settings.completionBubblesEnabled
         autoStartSwitch.isChecked = settings.autoStart
         longPressSpinner.setSelection(settings.longPressAction.ordinal, false)
         bindingSettings = false
@@ -253,8 +310,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderPet(pet: PetVisual?) {
         preview.setImageBitmap(pet?.bitmap)
+        val scale = pet?.let {
+            AppGraph.settings.settings.value.petSizeDp * resources.displayMetrics.density / it.bitmap.height
+        }
         previewText.text = when {
             pet == null -> "Питомец ChatGPT пока не обнаружен. Откройте Codex Remote или запустите задачу — listener продолжает ждать."
+            pet.frameSequences.isNotEmpty() -> buildString {
+                append("Pet pack: ${pet.frameSequences.size} анимаций")
+                if (pet.lookDirections.size == 16) append(" · 16 look-направлений")
+                append(" · масштаб ${"%.2f".format(scale ?: 1f)}×")
+                if (scale != null && scale <= 1.1f) append(" · нативное качество")
+            }
             pet.hasMeaningfulTransparency -> "Источник: ${pet.source.name} · SHA-256 ${pet.hash.take(12)}… · alpha сохранён"
             else -> "Источник: ${pet.source.name} · изображение почти непрозрачное; используйте Diagnostics"
         }
@@ -269,6 +335,9 @@ class MainActivity : AppCompatActivity() {
         val notificationAccess = SystemAccess.hasNotificationAccess(this)
         val overlayAccess = SystemAccess.canDrawOverlays(this)
         val ownNotifications = SystemAccess.hasOwnNotificationPermission(this)
+        val parsedItems = AppGraph.tasks.tasks.value
+        val codexTaskCount = parsedItems.count { it.isCodexTask() }
+        val chatMessageCount = parsedItems.count { it.kind == TaskKind.CHAT_MESSAGE }
         fun mark(value: Boolean) = if (value) "✓" else "○"
         statusText.text = buildString {
             appendLine("${mark(chatGpt)} ChatGPT найден")
@@ -277,14 +346,23 @@ class MainActivity : AppCompatActivity() {
             appendLine("${mark(overlayAccess)} Overlay permission")
             appendLine("${mark(ownNotifications)} Foreground notification")
             appendLine("${mark(pet != null)} Pet обнаружен")
-            append("ChatGPT notifications: ${listener.activeNotificationCount}; задач распознано: ${AppGraph.tasks.tasks.value.size}")
+            append("ChatGPT notifications: ${listener.activeNotificationCount}; ")
+            append("Codex-задач: $codexTaskCount; сообщений: $chatMessageCount")
         }
-        startButton.text = if (settings.overlayEnabled) "Скрыть Codex Pet" else "Запустить Codex Pet"
+        startButton.text = when {
+            !settings.overlayEnabled -> "Запустить Codex Pet"
+            !settings.petVisible -> "Показать Codex Pet"
+            else -> "Остановить Codex Pet"
+        }
     }
 
     private fun toggleOverlay() {
         lifecycleScope.launch {
             val enabled = AppGraph.settings.settings.value.overlayEnabled
+            if (enabled && !AppGraph.settings.settings.value.petVisible) {
+                AppGraph.settings.setPetVisible(true)
+                return@launch
+            }
             if (enabled) {
                 AppGraph.settings.setOverlayEnabled(false)
                 SystemAccess.stopOverlay(this@MainActivity)
@@ -305,6 +383,7 @@ class MainActivity : AppCompatActivity() {
                 toast("После выбора разрешения нажмите «Запустить» ещё раз")
                 return@launch
             }
+            AppGraph.settings.setPetVisible(true)
             AppGraph.settings.setOverlayEnabled(true)
             SystemAccess.startOverlay(this@MainActivity)
                 .onFailure {

@@ -9,7 +9,8 @@ flowchart TD
     F --> PA["PetAssetProvider"]
     NP --> TR["TaskRepository / StateFlow"]
     NP --> DR["DiagnosticsRepository"]
-    PA --> PR["PetRepository / cache"]
+    PA --> PR["PetRepository / preview cache"]
+    SP["Official v1/v2 pet pack import"] --> PR
     TR --> OC["OverlayController"]
     PR --> OC
 ```
@@ -42,12 +43,13 @@ flowchart TD
     H -- No --> L["Large icon"]
     L --> I{"Clean alpha?"}
     I -- Yes --> U
-    I -- No --> M["Manual fallback"]
+    I -- No --> M["Manual preview fallback"]
+    P["Official full pet pack"] --> A["Nine animations + optional look directions"]
 ```
 
 Safety gate требует alpha channel, не менее 2% полностью прозрачных pixels и минимум два прозрачных угла. Это эвристика обнаружения уже запечённого background, а не доказательство семантики изображения; Phase 0 всё равно обязателен.
 
-Adaptive icon не circle-crop-ится. Анализируется foreground Drawable до системной маски. Для native `Animatable` оригинальный Drawable остаётся в памяти и запускается; disk cache хранит безопасный статический PNG frame.
+Adaptive icon не circle-crop-ится. Анализируется foreground Drawable до системной маски. Поток avatar-кадров не используется для реконструкции закрытого sprite sheet: visual fingerprint отличает анимационный кадр от реальной смены персонажа. Для полного набора поддерживается исходная геометрия официального v1/v2 pack без transform-анимаций.
 
 ## Task model
 
@@ -60,6 +62,10 @@ InboxStyle lines не превращаются в отдельные задач�
 3. `FLAG_ONGOING_EVENT`;
 4. локальные текстовые эвристики;
 5. `UNKNOWN`.
+
+Notification channel `codex_remote_session` классифицируется как Codex task, `.avatar` — как скрытый pet/deep-link controller. Другие notifications настроенного ChatGPT package становятся `CHAT_MESSAGE`: они могут отображаться в bubble и открываться через собственный PendingIntent, но не считаются Codex-задачами.
+
+Выбор анимации выполняется отдельно: последняя конкретная RU/EN-эвристика актуального текста имеет приоритет над coarse structured status. Полная матрица описана в `docs/animation-mapping.md`.
 
 ## Overlay lifecycle
 

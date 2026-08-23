@@ -59,6 +59,7 @@ data class NotificationSnapshot(
     val groupKey: String?,
     val shortcutId: String?,
     val channelId: String?,
+    val notificationRole: String,
     val extraKeys: List<String>,
     val extras: Map<String, SanitizedText>,
     val progress: Int?,
