@@ -17,11 +17,12 @@ val hasReleaseSigning = listOf(
 ).all { !it.isNullOrBlank() }
 
 android {
+    // Kotlin/R namespace is intentionally independent from the installed Android application id.
     namespace = "com.fourerk.codexpet"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.fourerk.codexpet"
+        applicationId = "com.mr4erk.codexpet"
         minSdk = 30
         targetSdk = 36
         versionCode = 7
