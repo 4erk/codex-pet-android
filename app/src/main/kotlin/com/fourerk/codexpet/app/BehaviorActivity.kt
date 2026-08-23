@@ -1,5 +1,6 @@
 package com.fourerk.codexpet.app
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.AdapterView
@@ -29,16 +30,14 @@ class BehaviorActivity : AppCompatActivity() {
     }
 
     private fun buildContent(): View {
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(PetUi.dp(this@BehaviorActivity, 18), PetUi.dp(this@BehaviorActivity, 20), PetUi.dp(this@BehaviorActivity, 18), PetUi.dp(this@BehaviorActivity, 36))
-            setBackgroundColor(PetUi.BACKGROUND)
-        }
-        body.addView(PetUi.text(this, "Поведение", 28f, PetUi.TEXT, bold = true))
-        body.addView(PetUi.text(this, "Жесты, запуск и то, как пет ведёт себя в фоне.", 14f, PetUi.MUTED))
+        val body = PetUi.page(
+            this,
+            "Поведение",
+            "Запуск, жесты и работа поверх других приложений.",
+        )
 
         val launchCard = PetUi.card(this, "Запуск")
-        val autoRow = PetUi.toggle(this, "Запускать после перезагрузки", "Работает только если системные разрешения уже выданы.")
+        val autoRow = PetUi.toggle(this, "Запускать после перезагрузки", "Best effort: Android/MagicOS всё равно может ограничить background FGS.")
         autoStartSwitch = PetUi.switchFrom(autoRow)
         launchCard.addView(autoRow)
         launchCard.addView(PetUi.action(this, "Настройки фоновой работы") {
@@ -46,7 +45,7 @@ class BehaviorActivity : AppCompatActivity() {
         })
         body.addView(launchCard, PetUi.marginParams(this, 16))
 
-        val gestureCard = PetUi.card(this, "Долгое нажатие на пета")
+        val gestureCard = PetUi.card(this, "Долгое нажатие")
         longPressSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(
                 this@BehaviorActivity,
@@ -57,19 +56,22 @@ class BehaviorActivity : AppCompatActivity() {
         gestureCard.addView(longPressSpinner)
         gestureCard.addView(PetUi.text(
             this,
-            "Быстрое меню содержит только повседневные действия: текущий чат, настройки и скрытие. Диагностика вынесена в раздел помощи, чтобы не попадаться в обычном использовании.",
+            "Короткий тап — реплики. Drag — перемещение. Snap использует бег к краю и отменяется новым касанием. После движения всегда восстанавливается реальное состояние задачи.",
             12f,
             PetUi.MUTED,
         ))
         body.addView(gestureCard, PetUi.marginParams(this))
 
-        body.addView(PetUi.card(this, "Жесты").apply {
-            addView(PetUi.text(
-                this@BehaviorActivity,
-                "Нажатие — показать/скрыть реплики. Перетаскивание — передвинуть пета. Во время движения проигрывается бег в соответствующую сторону, после отпускания возвращается реальное состояние задачи.",
-                13f,
-                PetUi.MUTED,
-            ))
+        body.addView(PetUi.card(this, "Связано с фоном").apply {
+            addView(PetUi.navigationRow(this@BehaviorActivity, "↗", "Подключение", "Listener health, heartbeat и MagicOS recovery") {
+                startActivity(Intent(this@BehaviorActivity, IntegrationActivity::class.java))
+            })
+            addView(PetUi.navigationRow(this@BehaviorActivity, "⇩", "Обновления", "Автопроверка stable GitHub Releases") {
+                startActivity(Intent(this@BehaviorActivity, UpdatesActivity::class.java))
+            })
+            addView(PetUi.navigationRow(this@BehaviorActivity, "🐾", "Питомец", "Размер, позиция и snap") {
+                startActivity(Intent(this@BehaviorActivity, PetSettingsActivity::class.java))
+            })
         }, PetUi.marginParams(this))
 
         return ScrollView(this).apply { addView(body) }
