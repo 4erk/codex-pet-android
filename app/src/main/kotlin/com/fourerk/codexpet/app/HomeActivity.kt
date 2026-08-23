@@ -210,13 +210,21 @@ class HomeActivity : AppCompatActivity() {
                 it.animationCue == TaskAnimationCue.DISCONNECTED
         }
         liveStatus.text = buildString {
-            append(if (listener.connected) "Подключение работает" else "Подключение восстанавливается")
-            listener.lastHeartbeatAt?.let {
-                val age = ((System.currentTimeMillis() - it) / 1_000L).coerceAtLeast(0L)
-                append(" · ${age} с")
+            append(
+                when {
+                    !notificationAccess -> "Нет доступа к уведомлениям"
+                    listener.connected -> "Подключение работает"
+                    else -> "Подключение восстанавливается"
+                },
+            )
+            if (notificationAccess) {
+                listener.lastHeartbeatAt?.let {
+                    val age = ((System.currentTimeMillis() - it) / 1_000L).coerceAtLeast(0L)
+                    append(" · ${age} с")
+                }
+                append("\n${listener.activeNotificationCount} уведомл. · ${codexTasks.size} задач")
+                if (attention > 0) append(" · внимания: $attention")
             }
-            append("\n${listener.activeNotificationCount} уведомл. · ${codexTasks.size} задач")
-            if (attention > 0) append(" · внимания: $attention")
             if (update.phase in setOf(UpdatePhase.AVAILABLE, UpdatePhase.READY_TO_INSTALL)) {
                 append("\nОбновление ${update.latestVersion ?: ""} доступно")
             }
