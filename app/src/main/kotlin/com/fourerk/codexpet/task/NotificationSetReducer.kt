@@ -30,7 +30,7 @@ object NotificationSetReducer {
             .values
             .mapNotNull { duplicates ->
                 duplicates.maxWithOrNull(
-                    compareBy<CodexTask> { it.isGroupSummary }
+                    compareBy<CodexTask> { !it.isGroupSummary }
                         .thenBy { it.updatedAt },
                 )
             }
