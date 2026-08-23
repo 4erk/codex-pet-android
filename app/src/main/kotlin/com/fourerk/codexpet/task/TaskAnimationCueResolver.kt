@@ -24,11 +24,18 @@ data class TaskAnimationDecision(
     val source: CueSignalSource,
 )
 
-/** Text chooses the most specific animation first; structured status remains the fallback. */
+/**
+ * Conservative bilingual cue resolver. Strong states (input/error/connectivity) cannot be erased by
+ * a generic verb later in the sentence, while specific later workflow stages such as "now testing"
+ * can refine a coarse RUNNING notification.
+ */
 object TaskAnimationCueResolver {
+    private data class Rule(val cue: TaskAnimationCue, val pattern: Regex, val weight: Int)
+    private data class TextSignal(val cue: TaskAnimationCue, val score: Int, val lastIndex: Int)
+
     private val reconnectingWords = Regex(
         "(reconnect(?:ing|ion)?|trying to reconnect|restor(?:e|ing) (?:the )?connection|" +
-            "connecting to (?:the )?remote (?:computer|machine|host)|" +
+            "connecting to (?:the )?remote (?:computer|machine|host)|retrying connection|" +
             "переподключ(?:ается|ение|иться)|повторн(?:ое|ая) подключение|" +
             "восстанавливает (?:соединение|подключение|связь)|попытка подключиться)",
         RegexOption.IGNORE_CASE,
@@ -66,7 +73,7 @@ object TaskAnimationCueResolver {
     private val failedWords = Regex(
         "(?:^|\\b)(error|failed|failure|blocked|crash(?:ed)?|timed out|timeout|cancelled|canceled|" +
             "cannot continue|cannot complete|can't continue|could not|unable to|denied|rejected|" +
-            "unavailable|permission denied|merge conflict|tests? failed|build failed|" +
+            "permission denied|merge conflict|tests? failed|build failed|dependency failed|" +
             "ошибка|сбой|провал|заблокирован(?:о|а)?|не удалось|не может продолжить|невозможно|" +
             "отказано|запрещено|отклонен(?:о|а)?|нет доступа|отмен[её]н(?:о|а)?|тайм.?аут|" +
             "превышено время|конфликт|тесты упали|сборка упала)(?:\\b|$)",
@@ -76,7 +83,7 @@ object TaskAnimationCueResolver {
         "(?:^|\\b)(review(?:ing)?|inspect(?:ing|ion)?|validat(?:e|es|ing|ion)|check(?:s|ing)?|" +
             "verif(?:y|ies|ying|ication)|test(?:s|ing)?|audit(?:ing)?|analy[sz](?:e|es|ing|is)|" +
             "lint(?:ing)?|compar(?:e|es|ing|ison)|examin(?:e|es|ing|ation)|evaluat(?:e|es|ing|ion)|" +
-            "diagnos(?:e|es|ing|is)|monitor(?:s|ing)?|reading logs|running tests|" +
+            "diagnos(?:e|es|ing|is)|reading logs|running tests|running lint|checking build|" +
             "провер(?:яет|яют|яю|яем|ка|яется|ить)|ревью|валидир(?:ует|уют|ую|уем|ация)|" +
             "анализир(?:ует|уют|ую|уем|уется)|тестир(?:ует|уют|ую|уем|ование)|свер(?:яет|яют)|" +
             "аудит|линтинг|сравнивает|изучает|оценивает|диагностирует|читает логи|запускает тесты)(?:\\b|$)",
@@ -84,10 +91,15 @@ object TaskAnimationCueResolver {
     )
     private val completedWords = Regex(
         "(?:^|\\b)(completed|complete|done|finished|ready|succeeded|successful|success|" +
-            "passed|fixed|implemented|deployed|delivered|merged|resolved|all tests pass|" +
+            "passed|fixed|implemented|deployed|delivered|merged|resolved|all tests pass(?:ed)?|build passed|" +
             "готов(?:о|а|ы)?|заверш[её]н(?:о|а|ы)?|выполнен(?:о|а|ы)?|успешно|" +
             "исправлен(?:о|а|ы)?|реализован(?:о|а|ы)?|разв[её]рнут(?:о|а)?|доставлен(?:о|а)?|" +
             "объединен(?:о|а)?|решен(?:о|а)?|тесты прошли|сборка успешна)(?:\\b|$)",
+        RegexOption.IGNORE_CASE,
+    )
+    private val resumedWords = Regex(
+        "(?:^|\\b)(retrying|resuming|resumed|continuing|recovered and continuing|back online and working|" +
+            "повторяет попытку|возобнов(?:ляет|ил) работу|продолжает после ошибки|связь восстановлена,? продолжает)(?:\\b|$)",
         RegexOption.IGNORE_CASE,
     )
     private val activeWords = Regex(
@@ -102,37 +114,55 @@ object TaskAnimationCueResolver {
         RegexOption.IGNORE_CASE,
     )
 
-    private val textSignals = listOf(
-        TaskAnimationCue.ACTIVE to activeWords,
-        TaskAnimationCue.COMPLETED to completedWords,
-        TaskAnimationCue.REVIEWING to reviewWords,
-        TaskAnimationCue.FAILED to failedWords,
-        TaskAnimationCue.DISCONNECTED to disconnectedWords,
-        TaskAnimationCue.WAITING_FOR_INPUT to waitingWords,
-        TaskAnimationCue.RECONNECTING to reconnectingWords,
+    private val rules = listOf(
+        Rule(TaskAnimationCue.WAITING_FOR_INPUT, waitingWords, 105),
+        Rule(TaskAnimationCue.RECONNECTING, reconnectingWords, 101),
+        Rule(TaskAnimationCue.DISCONNECTED, disconnectedWords, 98),
+        Rule(TaskAnimationCue.FAILED, failedWords, 95),
+        Rule(TaskAnimationCue.ACTIVE, resumedWords, 94),
+        Rule(TaskAnimationCue.COMPLETED, completedWords, 88),
+        Rule(TaskAnimationCue.REVIEWING, reviewWords, 72),
+        Rule(TaskAnimationCue.ACTIVE, activeWords, 40),
     )
 
     fun resolve(status: TaskStatus, text: String?): TaskAnimationDecision {
-        val value = text.orEmpty()
-        val latestSignal = textSignals.mapIndexedNotNull { priority, (cue, pattern) ->
-            pattern.findAll(value).lastOrNull()?.let { match ->
-                TextSignal(cue, match.range.last, priority)
+        val signal = strongestTextSignal(text.orEmpty())
+        val cue = when (status) {
+            TaskStatus.ERROR -> when (signal?.cue) {
+                TaskAnimationCue.WAITING_FOR_INPUT,
+                TaskAnimationCue.RECONNECTING,
+                TaskAnimationCue.DISCONNECTED,
+                TaskAnimationCue.FAILED -> signal.cue
+                else -> TaskAnimationCue.FAILED
             }
-        }.maxWithOrNull(compareBy<TextSignal>(TextSignal::lastIndex).thenBy(TextSignal::priority))
-        if (latestSignal != null) {
-            return TaskAnimationDecision(latestSignal.cue, CueSignalSource.TEXT_HEURISTIC)
+            TaskStatus.COMPLETED -> when (signal?.cue) {
+                TaskAnimationCue.FAILED, TaskAnimationCue.DISCONNECTED -> signal.cue
+                else -> TaskAnimationCue.COMPLETED
+            }
+            TaskStatus.RUNNING -> signal?.cue ?: TaskAnimationCue.ACTIVE
+            TaskStatus.UNKNOWN -> signal?.cue ?: TaskAnimationCue.UNKNOWN
         }
-        return when (status) {
-            TaskStatus.RUNNING -> TaskAnimationDecision(TaskAnimationCue.ACTIVE, CueSignalSource.STRUCTURED_STATUS)
-            TaskStatus.COMPLETED -> TaskAnimationDecision(TaskAnimationCue.COMPLETED, CueSignalSource.STRUCTURED_STATUS)
-            TaskStatus.ERROR -> TaskAnimationDecision(TaskAnimationCue.FAILED, CueSignalSource.STRUCTURED_STATUS)
-            TaskStatus.UNKNOWN -> TaskAnimationDecision(TaskAnimationCue.UNKNOWN, CueSignalSource.NONE)
+        val source = if (signal != null && cue == signal.cue) {
+            CueSignalSource.TEXT_HEURISTIC
+        } else if (status != TaskStatus.UNKNOWN) {
+            CueSignalSource.STRUCTURED_STATUS
+        } else {
+            CueSignalSource.NONE
         }
+        return TaskAnimationDecision(cue, source)
     }
 
-    private data class TextSignal(
-        val cue: TaskAnimationCue,
-        val lastIndex: Int,
-        val priority: Int,
-    )
+    private fun strongestTextSignal(text: String): TextSignal? {
+        if (text.isBlank()) return null
+        return rules.mapNotNull { rule ->
+            val match = rule.pattern.findAll(text).lastOrNull() ?: return@mapNotNull null
+            val recency = ((match.range.last + 1).toDouble() / text.length.coerceAtLeast(1) * RECENCY_BONUS)
+                .toInt()
+            TextSignal(rule.cue, rule.weight + recency, match.range.last)
+        }.maxWithOrNull(
+            compareBy<TextSignal>(TextSignal::score).thenBy(TextSignal::lastIndex),
+        )
+    }
+
+    private const val RECENCY_BONUS = 30
 }
