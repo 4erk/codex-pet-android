@@ -202,7 +202,7 @@ internal object PetUi {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(context, 2), dp(context, 10), 0, dp(context, 10))
-        minHeight = dp(context, 56)
+        minimumHeight = dp(context, 56)
         isClickable = true
         isFocusable = true
         foreground = selectableForeground(context)
@@ -267,6 +267,7 @@ internal object PetUi {
         orientation = LinearLayout.HORIZONTAL
         setPadding(dp(context, 3), dp(context, 3), dp(context, 3), dp(context, 3))
         background = rounded(context, 0xFF101318.toInt(), 14, STROKE)
+        val group = this
         labels.forEachIndexed { index, label ->
             addView(
                 text(context, label, 13f, if (index == selected) TEXT else MUTED, bold = index == selected).apply {
@@ -277,7 +278,7 @@ internal object PetUi {
                     isClickable = true
                     isFocusable = true
                     setOnClickListener {
-                        setSegmentedSelection(this@apply, index)
+                        setSegmentedSelection(group, index)
                         onSelected(index)
                     }
                 },
