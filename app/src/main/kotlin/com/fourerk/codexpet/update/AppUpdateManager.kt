@@ -41,30 +41,28 @@ class AppUpdateManager(
     )
     private var availableRelease: StableReleaseInfo? = null
     private var downloadedFile: File? = null
+    private var downloadedReleaseVersion: String? = null
 
     val state = mutableState.asStateFlow()
 
     fun checkIfDue(force: Boolean = false) {
         scope.launch {
-            val currentSettings = settings.settings.value
-            if (!force && !currentSettings.autoUpdateEnabled) return@launch
-            if (!force && System.currentTimeMillis() - currentSettings.lastUpdateCheckAt < CHECK_INTERVAL_MS) return@launch
-            checkNow(force)
+            mutex.withLock {
+                val currentSettings = settings.readCurrent()
+                if (!force && !currentSettings.autoUpdateEnabled) return@withLock
+                if (!force && System.currentTimeMillis() - currentSettings.lastUpdateCheckAt < CHECK_INTERVAL_MS) {
+                    return@withLock
+                }
+                if (rejectDebugBuild()) return@withLock
+                performCheck(force)
+            }
         }
     }
 
     fun checkNow(force: Boolean = true) {
         scope.launch {
             mutex.withLock {
-                if (BuildConfig.DEBUG) {
-                    mutableState.value = UpdateState(
-                        phase = UpdatePhase.INCOMPATIBLE_BUILD,
-                        currentVersion = BuildConfig.VERSION_NAME,
-                        message = "Это debug-сборка. Автообновление включается после одноразовой установки stable APK из GitHub Release.",
-                        checkedAt = System.currentTimeMillis(),
-                    )
-                    return@withLock
-                }
+                if (rejectDebugBuild()) return@withLock
                 performCheck(force)
             }
         }
@@ -74,6 +72,7 @@ class AppUpdateManager(
         scope.launch {
             mutex.withLock {
                 val release = availableRelease ?: run {
+                    if (rejectDebugBuild()) return@withLock
                     performCheck(force = true)
                     availableRelease
                 } ?: return@withLock
@@ -85,15 +84,21 @@ class AppUpdateManager(
     fun installReady() {
         scope.launch {
             mutex.withLock {
-                val file = downloadedFile
-                if (file == null || !file.isFile) {
-                    val release = availableRelease ?: run {
-                        performCheck(force = true)
-                        availableRelease
-                    } ?: return@withLock
+                val release = availableRelease ?: run {
+                    if (rejectDebugBuild()) return@withLock
+                    performCheck(force = true)
+                    availableRelease
+                } ?: return@withLock
+
+                val currentFile = downloadedFile?.takeIf {
+                    it.isFile && downloadedReleaseVersion == release.version
+                }
+                if (currentFile == null) {
                     downloadRelease(release)
                 }
-                val ready = downloadedFile ?: return@withLock
+                val ready = downloadedFile?.takeIf {
+                    it.isFile && downloadedReleaseVersion == release.version
+                } ?: return@withLock
                 startInstall(ready)
             }
         }
@@ -115,6 +120,10 @@ class AppUpdateManager(
     }
 
     internal fun onInstallerStatus(status: Int, message: String?) {
+        if (status == PackageInstaller.STATUS_SUCCESS) {
+            clearDownloadedUpdate(deleteFile = true)
+            cancelUpdateNotification()
+        }
         mutableState.value = mutableState.value.copy(
             phase = when (status) {
                 PackageInstaller.STATUS_SUCCESS -> UpdatePhase.UP_TO_DATE
@@ -125,10 +134,21 @@ class AppUpdateManager(
         )
     }
 
+    private fun rejectDebugBuild(): Boolean {
+        if (!BuildConfig.DEBUG) return false
+        mutableState.value = UpdateState(
+            phase = UpdatePhase.INCOMPATIBLE_BUILD,
+            currentVersion = BuildConfig.VERSION_NAME,
+            message = "Это debug-сборка. Автообновление включается после одноразовой установки stable APK из GitHub Release.",
+            checkedAt = System.currentTimeMillis(),
+        )
+        return true
+    }
+
     private suspend fun performCheck(force: Boolean) {
-        if (!force && !settings.settings.value.autoUpdateEnabled) return
+        val currentSettings = settings.readCurrent()
+        if (!force && !currentSettings.autoUpdateEnabled) return
         val now = System.currentTimeMillis()
-        settings.setLastUpdateCheckAt(now)
         mutableState.value = mutableState.value.copy(
             phase = UpdatePhase.CHECKING,
             progressPercent = null,
@@ -136,6 +156,8 @@ class AppUpdateManager(
         )
         runCatching { fetchLatestRelease() }
             .onFailure { error ->
+                // Do not persist this timestamp as a successful check. The foreground pulse can
+                // retry soon after a temporary offline/GitHub failure instead of waiting 6 hours.
                 mutableState.value = mutableState.value.copy(
                     phase = UpdatePhase.ERROR,
                     message = "Не удалось проверить обновление: ${error.message ?: error.javaClass.simpleName}",
@@ -143,9 +165,12 @@ class AppUpdateManager(
                 )
             }
             .onSuccess { release ->
+                settings.setLastUpdateCheckAt(now)
                 if (!SemanticVersion.isNewer(release.version, BuildConfig.VERSION_NAME)) {
                     availableRelease = null
-                    downloadedFile = null
+                    clearDownloadedUpdate(deleteFile = true)
+                    cleanupUpdateCache()
+                    cancelUpdateNotification()
                     mutableState.value = UpdateState(
                         phase = UpdatePhase.UP_TO_DATE,
                         currentVersion = BuildConfig.VERSION_NAME,
@@ -155,6 +180,10 @@ class AppUpdateManager(
                         checkedAt = now,
                     )
                     return@onSuccess
+                }
+
+                if (availableRelease?.version != release.version) {
+                    clearDownloadedUpdate(deleteFile = true)
                 }
                 availableRelease = release
                 mutableState.value = UpdateState(
@@ -166,7 +195,8 @@ class AppUpdateManager(
                     checkedAt = now,
                 )
                 postUpdateNotification(release, ready = false)
-                if (settings.settings.value.autoDownloadUpdates && canAutoDownload()) {
+                val refreshedSettings = settings.readCurrent()
+                if (refreshedSettings.autoDownloadUpdates && canAutoDownload(refreshedSettings.updateWifiOnly)) {
                     downloadRelease(release)
                 }
             }
@@ -191,6 +221,8 @@ class AppUpdateManager(
             require(!json.optBoolean("draft", false) && !json.optBoolean("prerelease", false)) {
                 "Latest release is not stable"
             }
+            val version = json.getString("tag_name").removePrefix("v")
+            require(VERSION_PATTERN.matches(version)) { "Некорректный stable tag GitHub: $version" }
             val assetsJson = json.getJSONArray("assets")
             val assets = buildList {
                 for (index in 0 until assetsJson.length()) {
@@ -205,16 +237,19 @@ class AppUpdateManager(
                     )
                 }
             }
-            val selected = requireNotNull(ReleaseAssetSelector.select(assets)) {
-                "В latest GitHub Release нет stable APK"
+            val selected = requireNotNull(ReleaseAssetSelector.select(assets, version)) {
+                "В latest GitHub Release нет codex-pet-$version.apk"
             }
-            require(selected.downloadUrl.startsWith("https://")) { "APK URL is not HTTPS" }
+            val assetUri = Uri.parse(selected.downloadUrl)
+            require(assetUri.scheme == "https" && assetUri.host.equals("github.com", ignoreCase = true)) {
+                "APK URL должен быть HTTPS GitHub"
+            }
             require(selected.size in 1..MAX_APK_BYTES) { "Некорректный размер APK" }
-            require(selected.digest?.startsWith("sha256:") == true) {
-                "GitHub Release не содержит SHA-256 digest для APK"
+            require(SHA256_DIGEST.matches(selected.digest.orEmpty())) {
+                "GitHub Release не содержит корректный SHA-256 digest для APK"
             }
             StableReleaseInfo(
-                version = json.getString("tag_name").removePrefix("v"),
+                version = version,
                 htmlUrl = json.getString("html_url"),
                 body = json.optString("body").takeIf(String::isNotBlank),
                 asset = selected,
@@ -230,7 +265,7 @@ class AppUpdateManager(
             progressPercent = 0,
             message = "Скачиваю ${release.version}…",
         )
-        val directory = File(context.cacheDir, "updates").apply { mkdirs() }
+        val directory = updateDirectory().apply { mkdirs() }
         val target = File(directory, "codex-pet-${release.version}.apk")
         val temporary = File(directory, "codex-pet-${release.version}.apk.part")
         temporary.delete()
@@ -243,25 +278,29 @@ class AppUpdateManager(
         }
         try {
             require(connection.responseCode in 200..299) { "APK HTTP ${connection.responseCode}" }
+            require(connection.url.protocol.equals("https", ignoreCase = true)) { "APK redirect left HTTPS" }
             val expectedLength = connection.contentLengthLong.takeIf { it > 0 } ?: release.asset.size
             require(expectedLength <= MAX_APK_BYTES) { "APK слишком большой" }
+            var downloadedBytes = 0L
             connection.inputStream.use { input ->
                 temporary.outputStream().buffered().use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                    var total = 0L
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
-                        total += count
-                        require(total <= MAX_APK_BYTES) { "APK превысил лимит размера" }
+                        downloadedBytes += count
+                        require(downloadedBytes <= MAX_APK_BYTES) { "APK превысил лимит размера" }
                         digest.update(buffer, 0, count)
                         output.write(buffer, 0, count)
                         val progress = if (expectedLength > 0) {
-                            ((total * 100L) / expectedLength).toInt().coerceIn(0, 100)
+                            ((downloadedBytes * 100L) / expectedLength).toInt().coerceIn(0, 100)
                         } else null
                         mutableState.value = mutableState.value.copy(progressPercent = progress)
                     }
                 }
+            }
+            require(downloadedBytes == release.asset.size) {
+                "Размер APK не совпал с GitHub Release"
             }
             val actualDigest = digest.digest().joinToString("") { "%02x".format(it) }
             val expectedDigest = release.asset.digest!!.substringAfter("sha256:").lowercase()
@@ -274,6 +313,7 @@ class AppUpdateManager(
                 true
             }.getOrDefault(false)) { "Не удалось сохранить APK" }
             downloadedFile = target
+            downloadedReleaseVersion = release.version
             mutableState.value = mutableState.value.copy(
                 phase = UpdatePhase.READY_TO_INSTALL,
                 progressPercent = 100,
@@ -282,6 +322,7 @@ class AppUpdateManager(
             postUpdateNotification(release, ready = true)
         } catch (error: Throwable) {
             temporary.delete()
+            if (downloadedReleaseVersion == release.version) clearDownloadedUpdate(deleteFile = true)
             mutableState.value = mutableState.value.copy(
                 phase = UpdatePhase.ERROR,
                 progressPercent = null,
@@ -328,43 +369,56 @@ class AppUpdateManager(
                         Uri.parse("package:${context.packageName}"),
                     ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 )
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    phase = UpdatePhase.ERROR,
+                    message = "Не удалось открыть разрешение установки: ${error.javaClass.simpleName}",
+                )
             }
             return
         }
 
         val installer = context.packageManager.packageInstaller
-        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-            setAppPackageName(context.packageName)
-            if (Build.VERSION.SDK_INT >= 31) {
-                setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED)
-            }
-        }
-        val sessionId = installer.createSession(params)
-        installer.openSession(sessionId).use { session ->
-            file.inputStream().use { input ->
-                session.openWrite("base.apk", 0, file.length()).use { output ->
-                    input.copyTo(output)
-                    session.fsync(output)
+        var sessionId: Int? = null
+        runCatching {
+            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+                setAppPackageName(context.packageName)
+                if (Build.VERSION.SDK_INT >= 31) {
+                    setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED)
                 }
             }
-            val callback = PendingIntent.getBroadcast(
-                context,
-                sessionId,
-                Intent(context, UpdateInstallReceiver::class.java)
-                    .setAction(UpdateInstallReceiver.ACTION_INSTALL_STATUS),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
-            )
+            sessionId = installer.createSession(params)
+            installer.openSession(requireNotNull(sessionId)).use { session ->
+                file.inputStream().use { input ->
+                    session.openWrite("base.apk", 0, file.length()).use { output ->
+                        input.copyTo(output)
+                        session.fsync(output)
+                    }
+                }
+                val callback = PendingIntent.getBroadcast(
+                    context,
+                    requireNotNull(sessionId),
+                    Intent(context, UpdateInstallReceiver::class.java)
+                        .setAction(UpdateInstallReceiver.ACTION_INSTALL_STATUS),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+                )
+                mutableState.value = mutableState.value.copy(
+                    phase = UpdatePhase.INSTALLING,
+                    message = "Передаю APK системному установщику…",
+                )
+                session.commit(callback.intentSender)
+            }
+        }.onFailure { error ->
+            sessionId?.let { id -> runCatching { installer.abandonSession(id) } }
             mutableState.value = mutableState.value.copy(
-                phase = UpdatePhase.INSTALLING,
-                message = "Передаю APK системному установщику…",
+                phase = UpdatePhase.ERROR,
+                message = "Не удалось запустить установку: ${error.message ?: error.javaClass.simpleName}",
             )
-            session.commit(callback.intentSender)
         }
     }
 
-    private fun canAutoDownload(): Boolean {
-        val currentSettings = settings.settings.value
-        if (!currentSettings.updateWifiOnly) return true
+    private fun canAutoDownload(wifiOnly: Boolean): Boolean {
+        if (!wifiOnly) return true
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
         return connectivity.activeNetwork != null && !connectivity.isActiveNetworkMetered
     }
@@ -397,6 +451,24 @@ class AppUpdateManager(
         )
     }
 
+    private fun clearDownloadedUpdate(deleteFile: Boolean) {
+        if (deleteFile) downloadedFile?.delete()
+        downloadedFile = null
+        downloadedReleaseVersion = null
+    }
+
+    private fun cleanupUpdateCache() {
+        updateDirectory().listFiles()?.forEach { file ->
+            if (file.isFile) file.delete()
+        }
+    }
+
+    private fun updateDirectory(): File = File(context.cacheDir, "updates")
+
+    private fun cancelUpdateNotification() {
+        context.getSystemService(NotificationManager::class.java).cancel(UPDATE_NOTIFICATION_ID)
+    }
+
     private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
         .digest(bytes)
         .joinToString("") { "%02x".format(it) }
@@ -409,5 +481,7 @@ class AppUpdateManager(
         const val RELEASES_PAGE = "https://github.com/4erk/codex-pet-android/releases/latest"
         const val UPDATE_CHANNEL_ID = "codex_pet_updates"
         const val UPDATE_NOTIFICATION_ID = 5101
+        val VERSION_PATTERN = Regex("[0-9]+(?:\\.[0-9]+){1,3}")
+        val SHA256_DIGEST = Regex("sha256:[0-9a-fA-F]{64}")
     }
 }
