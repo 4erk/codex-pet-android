@@ -1,4 +1,4 @@
-name: Android CI
+name: Android CI and Release
 
 on:
   push:
@@ -6,12 +6,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -32,22 +32,22 @@ jobs:
       - name: Install SDK packages
         run: sdkmanager "platforms;android-36" "build-tools;35.0.0" "build-tools;36.0.0"
 
-      - name: Test, lint and assemble debug
+      - name: Unit tests, lint and debug APK
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 
-      - name: Upload debug APK
+      - name: Upload debug diagnostics APK
         uses: actions/upload-artifact@v4
         with:
-          name: codex-pet-android-debug
+          name: codex-pet-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 14
 
-      - name: Assemble unsigned release candidate
-        if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+      - name: Assemble minified unsigned release candidate
+        if: github.ref != 'refs/heads/main'
         run: ./gradlew --no-daemon assembleRelease
 
-      - name: Prepare production signing
-        id: release_signing
+      - name: Validate production signing secrets
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           CODEX_PET_KEYSTORE_BASE64: ${{ secrets.CODEX_PET_KEYSTORE_BASE64 }}
@@ -55,43 +55,79 @@ jobs:
           CODEX_PET_KEY_ALIAS: ${{ secrets.CODEX_PET_KEY_ALIAS }}
           CODEX_PET_KEY_PASSWORD: ${{ secrets.CODEX_PET_KEY_PASSWORD }}
         run: |
-          if [ -z "$CODEX_PET_KEYSTORE_BASE64" ] || \
-             [ -z "$CODEX_PET_KEYSTORE_PASSWORD" ] || \
-             [ -z "$CODEX_PET_KEY_ALIAS" ] || \
-             [ -z "$CODEX_PET_KEY_PASSWORD" ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Production signing is incomplete; CI will publish an unsigned release APK."
-            exit 0
-          fi
+          set -euo pipefail
+          missing=0
+          for value in CODEX_PET_KEYSTORE_BASE64 CODEX_PET_KEYSTORE_PASSWORD CODEX_PET_KEY_ALIAS CODEX_PET_KEY_PASSWORD; do
+            if [ -z "${!value:-}" ]; then
+              echo "::error::Required production secret $value is missing"
+              missing=1
+            fi
+          done
+          test "$missing" -eq 0
           echo "$CODEX_PET_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/codex-pet-release.jks"
-          echo "path=$RUNNER_TEMP/codex-pet-release.jks" >> "$GITHUB_OUTPUT"
-          echo "ready=true" >> "$GITHUB_OUTPUT"
+          test -s "$RUNNER_TEMP/codex-pet-release.jks"
 
-      - name: Assemble production release
+      - name: Assemble signed production release
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
-          CODEX_PET_KEYSTORE_PATH: ${{ steps.release_signing.outputs.path }}
+          CODEX_PET_KEYSTORE_PATH: ${{ runner.temp }}/codex-pet-release.jks
           CODEX_PET_KEYSTORE_PASSWORD: ${{ secrets.CODEX_PET_KEYSTORE_PASSWORD }}
           CODEX_PET_KEY_ALIAS: ${{ secrets.CODEX_PET_KEY_ALIAS }}
           CODEX_PET_KEY_PASSWORD: ${{ secrets.CODEX_PET_KEY_PASSWORD }}
         run: ./gradlew --no-daemon assembleRelease
 
-      - name: Verify production signature
-        if: steps.release_signing.outputs.ready == 'true'
-        run: apksigner verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+      - name: Verify, name and checksum production APK
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        id: release_meta
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n1)"
+          test -n "$VERSION"
+          NOTES="docs/releases/${VERSION}.md"
+          test -f "$NOTES" || { echo "::error::Missing release notes $NOTES"; exit 1; }
+          SOURCE="app/build/outputs/apk/release/app-release.apk"
+          test -f "$SOURCE"
+          apksigner verify --verbose --print-certs "$SOURCE"
+          OUT="$RUNNER_TEMP/release"
+          mkdir -p "$OUT"
+          APK_NAME="codex-pet-${VERSION}.apk"
+          cp "$SOURCE" "$OUT/$APK_NAME"
+          (cd "$OUT" && sha256sum "$APK_NAME" > "$APK_NAME.sha256")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "apk=$OUT/$APK_NAME" >> "$GITHUB_OUTPUT"
+          echo "checksum=$OUT/$APK_NAME.sha256" >> "$GITHUB_OUTPUT"
+          echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
 
-      - name: Upload signed production APK
-        if: steps.release_signing.outputs.ready == 'true'
+      - name: Upload signed production artifact
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
-          name: codex-pet-android-0.4.0-release-signed
-          path: app/build/outputs/apk/release/app-release.apk
+          name: codex-pet-${{ steps.release_meta.outputs.version }}-signed
+          path: |
+            ${{ steps.release_meta.outputs.apk }}
+            ${{ steps.release_meta.outputs.checksum }}
           if-no-files-found: error
+          retention-days: 90
 
-      - name: Upload unsigned production APK
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.release_signing.outputs.ready != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: codex-pet-android-0.4.0-release-unsigned
-          path: app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
+      - name: Publish GitHub stable Release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release_meta.outputs.tag }}
+          VERSION: ${{ steps.release_meta.outputs.version }}
+          APK: ${{ steps.release_meta.outputs.apk }}
+          CHECKSUM: ${{ steps.release_meta.outputs.checksum }}
+          NOTES: ${{ steps.release_meta.outputs.notes }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" "$CHECKSUM" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "$APK" "$CHECKSUM" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Codex Pet $VERSION" \
+              --notes-file "$NOTES" \
+              --verify-tag=false
+          fi
