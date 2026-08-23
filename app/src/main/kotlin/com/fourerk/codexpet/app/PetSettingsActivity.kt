@@ -2,7 +2,9 @@ package com.fourerk.codexpet.app
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -20,9 +22,10 @@ import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlinx.coroutines.launch
 
 class PetSettingsActivity : AppCompatActivity() {
+    private lateinit var previewStage: FrameLayout
     private lateinit var preview: ImageView
     private lateinit var sourceText: TextView
-    private lateinit var sizeLabel: TextView
+    private lateinit var sizeValue: TextView
     private lateinit var sizeSeek: SeekBar
     private lateinit var snapSwitch: SwitchMaterial
     private var binding = false
@@ -36,7 +39,7 @@ class PetSettingsActivity : AppCompatActivity() {
                     Toast.makeText(this@PetSettingsActivity, "Импортирован $type", Toast.LENGTH_SHORT).show()
                 }
                 .onFailure {
-                    Toast.makeText(this@PetSettingsActivity, "Не удалось импортировать: ${it.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@PetSettingsActivity, "Импорт не удался: ${it.message}", Toast.LENGTH_LONG).show()
                 }
         }
     }
@@ -52,18 +55,44 @@ class PetSettingsActivity : AppCompatActivity() {
         val body = PetUi.page(
             this,
             "Питомец",
-            "Внешность, размер, позиция и полный анимационный pack.",
+            "Внешность, реальный размер на экране и поведение overlay.",
         )
 
-        val petCard = PetUi.card(this, "Violet Vixen").apply {
-            preview = ImageView(this@PetSettingsActivity).apply {
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                contentDescription = "Предпросмотр питомца"
-            }
-            addView(preview, LinearLayout.LayoutParams.MATCH_PARENT, PetUi.dp(this@PetSettingsActivity, 190))
-            sourceText = PetUi.text(this@PetSettingsActivity, "Загружаю…", 13f, PetUi.MUTED)
-            addView(sourceText)
-            addView(PetUi.primaryAction(this@PetSettingsActivity, "Импортировать ZIP / PNG / WebP") {
+        val hero = PetUi.heroCard(this)
+        hero.addView(PetUi.text(this, "Предпросмотр", 17f, PetUi.TEXT, bold = true))
+        sourceText = PetUi.text(this, "Загружаю…", 12f, PetUi.MUTED).apply {
+            setPadding(0, PetUi.dp(this@PetSettingsActivity, 4), 0, PetUi.dp(this@PetSettingsActivity, 12))
+        }
+        hero.addView(sourceText)
+
+        previewStage = PetUi.previewSurface(this)
+        preview = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Предпросмотр размера питомца"
+        }
+        previewStage.addView(preview, FrameLayout.LayoutParams(PetUi.dp(this, 72), PetUi.dp(this, 72)))
+        hero.addView(previewStage, LinearLayout.LayoutParams.MATCH_PARENT, PetUi.dp(this, 238))
+
+        val sizeHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, PetUi.dp(this@PetSettingsActivity, 14), 0, 0)
+            addView(
+                PetUi.text(this@PetSettingsActivity, "Размер", 14.5f, PetUi.TEXT, bold = true),
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            sizeValue = PetUi.valuePill(this@PetSettingsActivity, "72 dp")
+            addView(sizeValue)
+        }
+        hero.addView(sizeHeader)
+        sizeSeek = SeekBar(this).apply { max = 112 }
+        hero.addView(sizeSeek)
+        hero.addView(PetUi.helper(this, "Размер меняется прямо в предпросмотре и соответствует размеру overlay в dp."))
+        body.addView(hero, PetUi.marginParams(this, 16))
+
+        body.addView(PetUi.sectionTitle(this, "Образ"))
+        body.addView(PetUi.card(this).apply {
+            addView(PetUi.primaryAction(this@PetSettingsActivity, "Импорт") {
                 importPet.launch(
                     arrayOf(
                         "application/zip",
@@ -74,61 +103,56 @@ class PetSettingsActivity : AppCompatActivity() {
                     ),
                 )
             })
-            addView(PetUi.action(this@PetSettingsActivity, "Перепроверить питомца из ChatGPT") {
+            addView(PetUi.action(this@PetSettingsActivity, "Обновить из ChatGPT") {
                 ChatGptNotificationListener.refresh(this@PetSettingsActivity)
-            })
-            addView(PetUi.text(
-                this@PetSettingsActivity,
-                "Для полной реакции нужен ZIP/spritesheet. Автоподхват из notification icon остаётся fallback и не должен заменять полный pack одиночным случайным кадром.",
-                12f,
-                PetUi.MUTED,
-            ))
-        }
-        body.addView(petCard, PetUi.marginParams(this, 16))
+            }, PetUi.marginParams(this@PetSettingsActivity, 8))
+            addView(PetUi.helper(this@PetSettingsActivity, "ZIP/spritesheet — основной источник полного pack. Notification icon остаётся только fallback."))
+        }, PetUi.marginParams(this, 4))
 
-        val sizeCard = PetUi.card(this, "На экране")
-        sizeLabel = PetUi.text(this, "Размер: 72 dp", 14f, PetUi.TEXT, bold = true)
-        sizeSeek = SeekBar(this).apply { max = 112 }
-        val snapRow = PetUi.toggle(this, "Прилипать к ближайшему краю", "Snap проигрывает бег в нужную сторону и не пересоздаёт реплики.")
+        body.addView(PetUi.sectionTitle(this, "На экране"))
+        val screen = PetUi.card(this)
+        val snapRow = PetUi.toggle(this, "Прилипать к краю", "После drag пет плавно доезжает до ближайшего края; баблы остаются прикреплены.")
         snapSwitch = PetUi.switchFrom(snapRow)
-        sizeCard.addView(sizeLabel)
-        sizeCard.addView(sizeSeek)
-        sizeCard.addView(snapRow)
-        body.addView(sizeCard, PetUi.marginParams(this))
+        screen.addView(snapRow)
+        PetUi.addDivider(screen, this)
+        screen.addView(PetUi.navigationRow(this, "⌁", "Поведение", "Жесты, автозапуск и фон") {
+            startActivity(Intent(this@PetSettingsActivity, BehaviorActivity::class.java))
+        })
+        body.addView(screen, PetUi.marginParams(this, 4))
 
-        body.addView(PetUi.card(this, "Рядом с питомцем").apply {
-            addView(PetUi.navigationRow(this@PetSettingsActivity, "💬", "Реплики", "Размер и количество баблов независимы от размера пета") {
+        body.addView(PetUi.sectionTitle(this, "Связано"))
+        body.addView(PetUi.card(this).apply {
+            addView(PetUi.navigationRow(this@PetSettingsActivity, "◰", "Реплики", "Масштаб и живой preview бабла") {
                 startActivity(Intent(this@PetSettingsActivity, SpeechSettingsActivity::class.java))
             })
-            addView(PetUi.navigationRow(this@PetSettingsActivity, "✦", "Анимации", "Проверить все 9 состояний текущего pack") {
+            PetUi.addDivider(this, this@PetSettingsActivity)
+            addView(PetUi.navigationRow(this@PetSettingsActivity, "✦", "Анимации", "Состояния и сценарии") {
                 startActivity(Intent(this@PetSettingsActivity, AnimationSettingsActivity::class.java))
             })
-            addView(PetUi.navigationRow(this@PetSettingsActivity, "◫", "Стенд баблов", "Потаскать пета с 1–5 репликами") {
+            PetUi.addDivider(this, this@PetSettingsActivity)
+            addView(PetUi.navigationRow(this@PetSettingsActivity, "▱", "Стенд", "Проверка 1–5 баблов") {
                 startActivity(Intent(this@PetSettingsActivity, BubbleLabActivity::class.java))
             })
-        }, PetUi.marginParams(this))
+        }, PetUi.marginParams(this, 4))
 
-        body.addView(PetUi.card(this, "Жесты").apply {
-            addView(PetUi.text(
-                this@PetSettingsActivity,
-                "Тап — показать/скрыть реплики. Долгое нажатие — быстрое меню. Drag не открывает чат; после отпускания пет возвращается к фактическому состоянию задачи.",
-                13f,
-                PetUi.MUTED,
-            ))
-            addView(PetUi.navigationRow(this@PetSettingsActivity, "⚙", "Настроить жесты", "Долгое нажатие и автозапуск") {
-                startActivity(Intent(this@PetSettingsActivity, BehaviorActivity::class.java))
-            })
-        }, PetUi.marginParams(this))
-
-        return ScrollView(this).apply { addView(body) }
+        return ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(body)
+        }
     }
 
     private fun bind() {
         sizeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                if (fromUser) sizeLabel.text = "Размер: ${progress + 48} dp"
+                if (!fromUser) return
+                val size = progress + 48
+                sizeValue.text = "$size dp"
+                renderPetPreview(size)
             }
+
             override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+
             override fun onStopTrackingTouch(seekBar: SeekBar) {
                 lifecycleScope.launch { AppGraph.settings.setPetSizeDp(seekBar.progress + 48) }
             }
@@ -145,23 +169,37 @@ class PetSettingsActivity : AppCompatActivity() {
                     AppGraph.settings.settings.collect { settings ->
                         binding = true
                         sizeSeek.progress = settings.petSizeDp - 48
-                        sizeLabel.text = "Размер: ${settings.petSizeDp} dp"
+                        sizeValue.text = "${settings.petSizeDp} dp"
                         snapSwitch.isChecked = settings.snapEnabled
                         binding = false
+                        renderPetPreview(settings.petSizeDp)
                     }
                 }
                 launch {
                     AppGraph.pets.visual.collect { pet ->
                         preview.setImageBitmap(pet?.bitmap)
                         sourceText.text = when {
-                            pet == null -> "Питомец пока не загружен"
+                            pet == null -> "Питомец не загружен"
                             pet.source == PetSource.BUILT_IN -> "Встроенный pack · ${pet.frameSequences.size}/9 анимаций"
                             pet.frameSequences.isNotEmpty() -> "Импортированный pack · ${pet.frameSequences.size}/9 анимаций"
-                            else -> "Статичное изображение · прозрачность ${if (pet.hasMeaningfulTransparency) "есть" else "ограничена"}"
+                            else -> "Статичное изображение"
                         }
                     }
                 }
             }
+        }
+    }
+
+    private fun renderPetPreview(sizeDp: Int) {
+        if (!::previewStage.isInitialized) return
+        val size = PetUi.dp(this, sizeDp.coerceIn(48, 160))
+        preview.layoutParams = (preview.layoutParams as FrameLayout.LayoutParams).apply {
+            width = size
+            height = size
+        }
+        previewStage.post {
+            preview.x = ((previewStage.width - size) / 2f).coerceAtLeast(0f)
+            preview.y = ((previewStage.height - size) / 2f).coerceAtLeast(0f)
         }
     }
 }
