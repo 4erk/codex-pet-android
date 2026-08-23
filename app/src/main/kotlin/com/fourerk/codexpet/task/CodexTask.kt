@@ -37,11 +37,14 @@ data class CodexTask(
     val detail: String? = null,
     val animationCue: TaskAnimationCue = TaskAnimationCue.UNKNOWN,
     val animationCueSource: CueSignalSource = CueSignalSource.NONE,
+    val isGroupSummary: Boolean = false,
 )
 
 fun CodexTask.isDisplayTask(): Boolean = kind != TaskKind.BUBBLE_CONTROLLER
 
 fun CodexTask.isCodexTask(): Boolean = kind == TaskKind.TASK
+
+fun CodexTask.hasExactOpenTarget(): Boolean = contentIntent != null || bubbleIntent != null
 
 internal fun CodexTask.hasSameVisibleContent(other: CodexTask): Boolean =
     id == other.id &&
@@ -56,7 +59,8 @@ internal fun CodexTask.hasSameVisibleContent(other: CodexTask): Boolean =
         contentIntent == other.contentIntent &&
         bubbleIntent == other.bubbleIntent &&
         sourceNotificationKey == other.sourceNotificationKey &&
-        groupKey == other.groupKey
+        groupKey == other.groupKey &&
+        isGroupSummary == other.isGroupSummary
 
 data class TaskTransition(
     val taskId: String,
