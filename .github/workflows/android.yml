@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  EXPECTED_APPLICATION_ID: com.mr4erk.codexpet
+  EXPECTED_RELEASE_CERT_SHA256: d6200054b397e388146862d605d0aeea3c98f43af5040d7cef2ac274095a9b96
+
 jobs:
   verify:
     permissions:
@@ -36,6 +40,24 @@ jobs:
 
       - name: Assemble minified release candidate
         run: ./gradlew --no-daemon assembleRelease
+
+      - name: Verify built APK package identities
+        run: |
+          set -euo pipefail
+          DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
+          RELEASE_APK="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n1)"
+          test -f "$DEBUG_APK"
+          test -n "$RELEASE_APK" && test -f "$RELEASE_APK"
+          DEBUG_ID="$(apkanalyzer manifest application-id "$DEBUG_APK" | tr -d '\r')"
+          RELEASE_ID="$(apkanalyzer manifest application-id "$RELEASE_APK" | tr -d '\r')"
+          test "$DEBUG_ID" = "${EXPECTED_APPLICATION_ID}.debug" || {
+            echo "::error::Unexpected debug applicationId: $DEBUG_ID"
+            exit 1
+          }
+          test "$RELEASE_ID" = "$EXPECTED_APPLICATION_ID" || {
+            echo "::error::Unexpected release applicationId: $RELEASE_ID"
+            exit 1
+          }
 
       - name: Upload debug diagnostics APK
         uses: actions/upload-artifact@v4
@@ -96,7 +118,7 @@ jobs:
           CODEX_PET_KEY_PASSWORD: ${{ secrets.CODEX_PET_KEY_PASSWORD }}
         run: ./gradlew --no-daemon assembleRelease
 
-      - name: Verify, name and checksum production APK
+      - name: Verify identity, signing certificate and checksum
         id: release_meta
         run: |
           set -euo pipefail
@@ -106,7 +128,26 @@ jobs:
           test -f "$NOTES" || { echo "::error::Missing release notes $NOTES"; exit 1; }
           SOURCE="app/build/outputs/apk/release/app-release.apk"
           test -f "$SOURCE"
-          apksigner verify --verbose --print-certs "$SOURCE"
+
+          PACKAGE_ID="$(apkanalyzer manifest application-id "$SOURCE" | tr -d '\r')"
+          test "$PACKAGE_ID" = "$EXPECTED_APPLICATION_ID" || {
+            echo "::error::Production APK applicationId is $PACKAGE_ID, expected $EXPECTED_APPLICATION_ID"
+            exit 1
+          }
+
+          CERT_OUTPUT="$(apksigner verify --verbose --print-certs "$SOURCE")"
+          printf '%s\n' "$CERT_OUTPUT"
+          CERT_SHA="$(printf '%s\n' "$CERT_OUTPUT" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \
+            | head -n1 \
+            | tr '[:upper:]' '[:lower:]' \
+            | tr -d ':[:space:]')"
+          test -n "$CERT_SHA" || { echo "::error::Could not read signer SHA-256"; exit 1; }
+          test "$CERT_SHA" = "$EXPECTED_RELEASE_CERT_SHA256" || {
+            echo "::error::Wrong production signing certificate SHA-256: $CERT_SHA"
+            exit 1
+          }
+
           OUT="$RUNNER_TEMP/release"
           mkdir -p "$OUT"
           APK_NAME="codex-pet-${VERSION}.apk"
