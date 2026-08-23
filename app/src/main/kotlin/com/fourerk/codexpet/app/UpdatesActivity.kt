@@ -7,12 +7,14 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.fourerk.codexpet.BuildConfig
 import com.fourerk.codexpet.update.UpdatePhase
+import com.fourerk.codexpet.update.UpdateSource
 import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlinx.coroutines.launch
 import java.text.DateFormat
@@ -21,10 +23,15 @@ import java.util.Date
 class UpdatesActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var primaryButton: Button
+    private lateinit var manualApkButton: Button
     private lateinit var autoSwitch: SwitchMaterial
     private lateinit var downloadSwitch: SwitchMaterial
     private lateinit var wifiSwitch: SwitchMaterial
     private var binding = false
+
+    private val manualApkPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(AppGraph.updates::prepareManualApk)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,25 +47,47 @@ class UpdatesActivity : AppCompatActivity() {
     }
 
     private fun buildContent(): View {
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(PetUi.dp(this@UpdatesActivity, 18), PetUi.dp(this@UpdatesActivity, 20), PetUi.dp(this@UpdatesActivity, 18), PetUi.dp(this@UpdatesActivity, 36))
-            setBackgroundColor(PetUi.BACKGROUND)
-        }
-        body.addView(PetUi.text(this, "Обновления", 28f, PetUi.TEXT, bold = true))
-        body.addView(PetUi.text(this, "Стабильный канал GitHub Releases с проверкой SHA-256 и подписи APK.", 14f, PetUi.MUTED))
+        val body = PetUi.page(
+            this,
+            "Обновления",
+            "Автоматический stable-канал и ручное обновление с теми же проверками подписи.",
+        )
 
         val current = PetUi.card(this, "Текущая версия")
         statusText = PetUi.text(this, "Codex Pet ${BuildConfig.VERSION_NAME}", 13f, PetUi.MUTED)
         current.addView(statusText)
-        primaryButton = PetUi.action(this, "Проверить сейчас") { handlePrimaryAction() }
-        current.addView(primaryButton)
-        current.addView(PetUi.action(this, "Открыть GitHub Release") {
+        body.addView(current, PetUi.marginParams(this, 16))
+
+        val manualCard = PetUi.card(this, "Вручную")
+        manualCard.addView(PetUi.text(
+            this,
+            "Работает независимо от автоматических настроек. Можно прямо сейчас проверить GitHub stable или выбрать уже скачанный APK с телефона.",
+            12f,
+            PetUi.MUTED,
+        ))
+        primaryButton = PetUi.primaryAction(this, "Проверить GitHub сейчас") { handlePrimaryAction() }
+        manualCard.addView(primaryButton, PetUi.marginParams(this, 8))
+        manualApkButton = PetUi.action(this, "Выбрать APK из файла") {
+            manualApkPicker.launch(
+                arrayOf(
+                    "application/vnd.android.package-archive",
+                    "application/octet-stream",
+                ),
+            )
+        }
+        manualCard.addView(manualApkButton)
+        manualCard.addView(PetUi.action(this, "Открыть GitHub Releases") {
             if (!AppGraph.updates.openReleasePage()) {
                 AppGraph.updates.checkNow()
             }
         })
-        body.addView(current, PetUi.marginParams(this, 16))
+        manualCard.addView(PetUi.text(
+            this,
+            "APK из файла принимается только если Android распознаёт его как более новую версию этого же Codex Pet и сертификат подписи в точности совпадает. Старую/ту же версию и чужой APK приложение отвергнет до установки.",
+            12f,
+            PetUi.MUTED,
+        ))
+        body.addView(manualCard, PetUi.marginParams(this))
 
         val autoCard = PetUi.card(this, "Автоматически")
         val autoRow = PetUi.toggle(this, "Проверять новые stable-релизы", "На старте приложения и периодически, пока пет работает.")
@@ -75,17 +104,18 @@ class UpdatesActivity : AppCompatActivity() {
         body.addView(PetUi.card(this, "Как устанавливается").apply {
             addView(PetUi.text(
                 this@UpdatesActivity,
-                "Codex Pet не обходит защиту Android. После безопасной загрузки APK системный Package Installer попросит подтверждение. Первый раз Android также может попросить разрешить установку обновлений из Codex Pet.",
+                "Оба пути сходятся в один безопасный install flow. Codex Pet проверяет APK, затем передаёт его системному Android Package Installer. Защита Android не обходится: установка требует системного подтверждения, а первый раз Android может попросить разрешить Codex Pet устанавливать обновления из этого источника.",
                 13f,
                 PetUi.MUTED,
             ))
         }, PetUi.marginParams(this))
 
         body.addView(PetUi.card(this, "Связанные настройки").apply {
-            addView(PetUi.action(this@UpdatesActivity, "Подключение и listener") {
+            addView(PetUi.navigationRow(this@UpdatesActivity, "↗", "Подключение и listener", "Проверка источника состояний и self-heal") {
                 startActivity(Intent(this@UpdatesActivity, IntegrationActivity::class.java))
             })
-            addView(PetUi.action(this@UpdatesActivity, "Помощь и диагностика") {
+            addView(PetUi.divider(this@UpdatesActivity), LinearLayout.LayoutParams.MATCH_PARENT, PetUi.dp(this@UpdatesActivity, 1))
+            addView(PetUi.navigationRow(this@UpdatesActivity, "?", "Помощь и диагностика", "Восстановление, логи состояния и тестовые сценарии") {
                 startActivity(Intent(this@UpdatesActivity, HelpActivity::class.java))
             })
         }, PetUi.marginParams(this))
@@ -130,7 +160,8 @@ class UpdatesActivity : AppCompatActivity() {
             UpdatePhase.INCOMPATIBLE_BUILD -> AppGraph.updates.openReleasePage()
             UpdatePhase.DOWNLOADING,
             UpdatePhase.INSTALLING,
-            UpdatePhase.CHECKING -> Unit
+            UpdatePhase.CHECKING,
+            UpdatePhase.VALIDATING_MANUAL -> Unit
             else -> AppGraph.updates.checkNow()
         }
     }
@@ -140,8 +171,15 @@ class UpdatesActivity : AppCompatActivity() {
         val state = AppGraph.updates.state.value
         statusText.text = buildString {
             append("Установлено: ${state.currentVersion}")
-            state.latestVersion?.let { append("\nGitHub stable: $it") }
-            state.progressPercent?.let { append("\nЗагрузка: $it%") }
+            state.latestVersion?.let {
+                append(
+                    when (state.source) {
+                        UpdateSource.LOCAL_FILE -> "\nAPK из файла: $it"
+                        else -> "\nGitHub stable: $it"
+                    },
+                )
+            }
+            state.progressPercent?.let { append("\nГотовность: $it%") }
             state.message?.let { append("\n$it") }
             state.checkedAt?.let {
                 append("\nПроверено: ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))}")
@@ -150,17 +188,21 @@ class UpdatesActivity : AppCompatActivity() {
         primaryButton.text = when (state.phase) {
             UpdatePhase.AVAILABLE -> "Скачать обновление"
             UpdatePhase.DOWNLOADING -> "Скачивается…"
+            UpdatePhase.VALIDATING_MANUAL -> "Проверяю APK…"
             UpdatePhase.READY_TO_INSTALL -> "Установить"
             UpdatePhase.NEEDS_INSTALL_PERMISSION -> "Разрешить и установить"
             UpdatePhase.INSTALLING -> "Ожидает Android…"
-            UpdatePhase.CHECKING -> "Проверяю…"
+            UpdatePhase.CHECKING -> "Проверяю GitHub…"
             UpdatePhase.INCOMPATIBLE_BUILD -> "Открыть stable Release"
-            else -> "Проверить сейчас"
+            else -> "Проверить GitHub сейчас"
         }
-        primaryButton.isEnabled = state.phase !in setOf(
+        val busy = state.phase in setOf(
             UpdatePhase.DOWNLOADING,
             UpdatePhase.INSTALLING,
             UpdatePhase.CHECKING,
+            UpdatePhase.VALIDATING_MANUAL,
         )
+        primaryButton.isEnabled = !busy
+        manualApkButton.isEnabled = !busy
     }
 }

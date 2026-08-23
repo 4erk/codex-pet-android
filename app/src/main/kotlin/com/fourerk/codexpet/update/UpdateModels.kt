@@ -3,6 +3,7 @@ package com.fourerk.codexpet.update
 enum class UpdatePhase {
     IDLE,
     CHECKING,
+    VALIDATING_MANUAL,
     UP_TO_DATE,
     AVAILABLE,
     DOWNLOADING,
@@ -13,6 +14,11 @@ enum class UpdatePhase {
     ERROR,
 }
 
+enum class UpdateSource {
+    GITHUB,
+    LOCAL_FILE,
+}
+
 data class UpdateState(
     val phase: UpdatePhase = UpdatePhase.IDLE,
     val currentVersion: String,
@@ -21,6 +27,7 @@ data class UpdateState(
     val progressPercent: Int? = null,
     val message: String? = null,
     val checkedAt: Long? = null,
+    val source: UpdateSource? = null,
 )
 
 data class ReleaseAssetInfo(
@@ -66,4 +73,10 @@ object ReleaseAssetSelector {
         val expected = "codex-pet-${version.removePrefix("v")}.apk"
         return assets.firstOrNull { it.name.equals(expected, ignoreCase = true) }
     }
+}
+
+object ManualApkPolicy {
+    /** Manual update is deliberately an upgrade path, not a generic APK/reinstall/downgrade tool. */
+    fun isUpgrade(candidateVersionCode: Long, currentVersionCode: Long): Boolean =
+        candidateVersionCode > currentVersionCode
 }

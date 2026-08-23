@@ -4,7 +4,7 @@
 
 Проект не модифицирует ChatGPT, не использует root, Accessibility, Shizuku, hooking, приватные файлы ChatGPT или закрытые OpenAI API. Состояние задач берётся только из публичного Android notification API; сеть используется отдельно только для stable-обновлений через публичные GitHub Releases.
 
-> Текущий stable: `0.5.0`. Интеграция остаётся notification-driven и умеет самовосстанавливаться при зависании listener/OEM binding.
+> Текущий stable: `0.5.1`. Интеграция остаётся notification-driven и умеет самовосстанавливаться при зависании listener/OEM binding.
 
 ## Основное
 
@@ -19,13 +19,14 @@
 
 `NotificationListenerService` отслеживает настроенный source package (по умолчанию `com.openai.chatgpt`).
 
-В `0.5.0` listener больше не полагается на один callback или один channel id:
+Начиная с `0.5.0` listener больше не полагается на один callback или один channel id:
 
 - heartbeat через периодический `activeNotifications` snapshot;
 - debounced reconcile после posted/removed/ranking событий;
 - защита от stale параллельных snapshot;
 - повторный `requestRebind` с backoff;
 - forced unbind/rebind после серии ошибок activeNotifications;
+- дополнительный health pulse из foreground overlay, чтобы OEM kill listener восстанавливался без обязательного открытия Home;
 - адаптивная классификация Codex по channel/shortcut/progress/ongoing/text signals вместо жёсткой зависимости от `codex_remote_session`.
 
 ## Реплики
@@ -35,8 +36,8 @@
 - Независимый от pet масштаб `0.75×–1.50×`.
 - Safe-area placement: справа/слева, при нехватке места сверху/снизу.
 - Drag и snap перемещают уже attached `WindowManager` views через `updateViewLayout` — без remove/add мерцания.
-- Overflow ротируется страницами.
-- Приоритет: requires-input → blocked/error → result → running.
+- Если все выбранные баблы физически не помещаются, страница автоматически уменьшается до реально помещающегося количества, а overflow ротируется следующей страницей.
+- Приоритет: requires-input → blocked/error → reconnect → review → running.
 - Attention-события остаются до изменения notification; completion/chat — transient.
 - Встроенный интерактивный **стенд 1–5 баблов** позволяет проверять компоновку без реальных уведомлений.
 - Тап по баблу: `contentIntent` → bubble intent → launcher ChatGPT.
@@ -54,23 +55,41 @@
 - `WAVING`: приветствие, новое сообщение, восстановление связи;
 - `RUNNING_LEFT/RIGHT`: drag и edge snap.
 
-Текстовые эвристики RU/EN имеют веса. Структурированный status/progress сильнее слабого глагола; явная ошибка не исчезает из-за позднего `building`, а явный `retrying/resuming` может корректно восстановить состояние.
+Текстовые эвристики RU/EN имеют веса. Структурированный status/progress сильнее слабого глагола; явная ошибка не исчезает из-за позднего `building`, а явный `retrying/resuming` может корректно восстановить состояние. Явный reconnect имеет приоритет над устаревшим `ERROR` status, пока соединение действительно восстанавливается.
 
 ## Обновление приложения
 
-Stable-build проверяет `https://api.github.com/repos/4erk/codex-pet-android/releases/latest`.
+Есть два независимых пути.
 
-Перед установкой APK проверяются:
+### Автоматически / через GitHub
+
+Stable-build проверяет `https://api.github.com/repos/4erk/codex-pet-android/releases/latest`. Автопроверку и автозагрузку можно отключить независимо. Кнопка **«Проверить GitHub сейчас»** работает всегда и не зависит от этих переключателей.
+
+Перед установкой GitHub APK проверяются:
 
 1. stable GitHub Release;
-2. HTTPS asset URL и разумный размер;
-3. GitHub `sha256` digest release asset;
-4. Android package name;
-5. точное совпадение signing certificate с установленным Codex Pet.
+2. точное имя asset `codex-pet-<version>.apk`;
+3. HTTPS asset URL и разумный размер;
+4. GitHub `sha256` digest release asset;
+5. Android package name;
+6. точное совпадение signing certificate с установленным Codex Pet.
 
-Затем APK передаётся системному `PackageInstaller`. Защита Android не обходится: пользователь подтверждает установку, а при первом обновлении Android может попросить разрешить Codex Pet устанавливать обновления из этого источника.
+### Вручную из APK-файла
 
-Debug-build намеренно не обновляется поверх stable: один раз нужно установить stable APK, подписанный постоянным release key. После этого все будущие stable-версии обновляются тем же сертификатом.
+В разделе **Обновления → Вручную → Выбрать APK из файла** можно выбрать уже скачанную сборку без обращения к GitHub API.
+
+Файл копируется во внутренний cache приложения и принимается только если:
+
+1. Android распознаёт его как APK;
+2. package name совпадает с установленным Codex Pet;
+3. signing certificate совпадает в точности;
+4. `versionCode` строго выше установленного.
+
+Таким образом ручной путь не является произвольным APK installer: downgrade, переустановка той же версии и чужие APK отклоняются до системной установки.
+
+После любой проверки APK передаётся системному `PackageInstaller`. Защита Android не обходится: пользователь подтверждает установку, а при первом обновлении Android может попросить разрешить Codex Pet устанавливать обновления из этого источника.
+
+Debug-build намеренно не обновляется из GitHub stable поверх release application id. Локальный APK можно использовать для debug только если он относится к тому же debug package и подписан тем же debug key.
 
 ## Интерфейс
 
@@ -81,14 +100,14 @@ Debug-build намеренно не обновляется поверх stable: 
 - **Анимации** → сценарии/условия/ручной тест → реплики и listener;
 - **Подключение** → heartbeat/rebind/system access/MagicOS;
 - **Поведение** → gestures/autostart/background;
-- **Обновления** → stable channel/download/install;
+- **Обновления** → отдельные ручные и автоматические сценарии;
 - **Помощь** → восстановление, visual lab и diagnostics.
 
 UI использует крупную визуальную иерархию, сгруппированные settings-карточки и disclosure-navigation вместо длинного набора равнозначных кнопок.
 
 ## Приватность и permissions
 
-Notification/task text обрабатывается локально и не отправляется в GitHub update requests. История переписки на диск не сохраняется.
+Notification/task text обрабатывается локально и не отправляется в GitHub update requests. История переписки на диск не сохраняется. Выбранный вручную APK копируется только во внутренний update cache и не загружает пользовательские данные в сеть.
 
 Permissions:
 
@@ -125,21 +144,24 @@ PR обязан пройти unit tests, lint, debug APK и minified release can
 1. собирает release с R8/resource shrinking;
 2. проверяет подпись через `apksigner`;
 3. создаёт `codex-pet-<version>.apk` + `.sha256`;
-4. публикует/обновляет GitHub Release `v<version>`.
+4. публикует GitHub Release `v<version>`.
+
+GitHub REST Release Assets возвращает SHA-256 `digest`, который используется встроенным updater для проверки загруженного stable APK.
 
 ## HONOR / MagicOS
 
-См. [docs/magicos.md](docs/magicos.md). Для максимальной устойчивости разрешите Auto-launch, Secondary launch и Run in background и исключите Codex Pet из battery optimization. Даже при OEM kill listener/overlay теперь имеют self-heal при следующей доступной точке восстановления.
+См. [docs/magicos.md](docs/magicos.md). Для максимальной устойчивости разрешите Auto-launch, Secondary launch и Run in background и исключите Codex Pet из battery optimization. Даже при OEM kill listener/overlay имеют self-heal при следующей доступной точке восстановления; пока foreground pet жив, отдельный health pulse также пытается восстановить listener.
 
 ## Ограничения
 
 - Android notification API может содержать меньше задач, чем внутренний activity tray ChatGPT; приложение не выдумывает отсутствующие задачи.
 - Отключение системных ChatGPT bubbles может изменить наличие `BubbleMetadata`, но обычные notifications должны остаться включёнными.
 - Background FGS/autostart остаются subject to Android/MagicOS restrictions.
-- Автообновление работает только между APK с одинаковым release signing certificate.
+- Автообновление и ручное обновление APK работают только между сборками с одинаковым signing certificate.
 
 ## Release notes
 
+- [0.5.1](docs/releases/0.5.1.md)
 - [0.5.0](docs/releases/0.5.0.md)
 - [0.4.0](docs/releases/0.4.0.md)
 - [0.3.0-beta1](docs/releases/0.3.0-beta1.md)

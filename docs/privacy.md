@@ -35,7 +35,7 @@ Manifest содержит `INTERNET` и `ACCESS_NETWORK_STATE` исключит�
 
 Codex Pet обращается к публичному GitHub Releases API репозитория `4erk/codex-pet-android` и, если пользователь разрешил, скачивает APK-asset выбранного stable release. Notification/task text, диагностические snapshots, pet pack и пользовательские настройки в эти запросы не добавляются.
 
-Перед установкой скачанного APK приложение проверяет:
+Перед установкой скачанного из GitHub APK приложение проверяет:
 
 - HTTPS URL;
 - размер файла;
@@ -43,7 +43,22 @@ Codex Pet обращается к публичному GitHub Releases API ре�
 - Android package name;
 - совпадение сертификата подписи APK с уже установленным Codex Pet.
 
-Установка выполняется через системный Android `PackageInstaller` и требует предусмотренного Android подтверждения пользователя. `REQUEST_INSTALL_PACKAGES` нужен только для этого сценария обновления.
+## Ручное обновление из файла
+
+Пользователь может выбрать APK через системный Android Storage Access Framework. Codex Pet не запрашивает storage-wide или media permissions для этого сценария.
+
+После выбора:
+
+- URI используется только для одноразового чтения;
+- исходный URI не сохраняется в настройках;
+- APK копируется во внутренний private cache Codex Pet с ограничением максимального размера;
+- Android package name должен совпадать с текущим приложением;
+- signing certificate должен совпадать в точности;
+- `versionCode` должен быть строго выше установленного.
+
+Ручной APK никуда не загружается и не вызывает сетевой запрос. Старые версии, та же версия и APK другого приложения отклоняются до запуска системного установщика.
+
+Установка и GitHub-, и ручного APK выполняется через системный Android `PackageInstaller` и требует предусмотренного Android подтверждения пользователя. `REQUEST_INSTALL_PACKAGES` нужен только для этих сценариев обновления.
 
 В приложении отсутствуют analytics, Crashlytics, telemetry, ads и trackers. Cleartext traffic запрещён через manifest/network security config.
 
