@@ -70,6 +70,9 @@ class ChatGptNotificationListener : NotificationListenerService() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // Some OEM builds create the service but delay/lose the first connected callback. A
+        // one-shot grace timer turns that silent half-bound state into the normal rebind loop.
+        mainHandler.postDelayed(rebindRunnable, INITIAL_BIND_GRACE_MS)
     }
 
     override fun onDestroy() {
@@ -279,6 +282,7 @@ class ChatGptNotificationListener : NotificationListenerService() {
         private const val REMOVED_RECONCILE_DELAY_MS = 300L
         private const val RANKING_RECONCILE_DELAY_MS = 400L
         private const val WATCHDOG_INTERVAL_MS = 12_000L
+        private const val INITIAL_BIND_GRACE_MS = 5_000L
 
         @Volatile
         private var instance: ChatGptNotificationListener? = null
