@@ -4,14 +4,14 @@
 
 Проект не модифицирует ChatGPT, не использует root, Accessibility, Shizuku, hooking, приватные файлы ChatGPT или закрытые OpenAI API. Источник состояния — только публичный Android notification API.
 
-> Текущий статус: `0.3.0-beta1`. Phase 0 probe реализован; фактически доступные icon/extras могут меняться между версиями ChatGPT и Android, поэтому приложение сохраняет санитизированную диагностику и честно показывает выбранный источник.
+> Текущий стабильный релиз: `0.4.0`. Базовая интеграция остаётся notification-driven: фактически доступные icon/extras могут меняться между версиями ChatGPT и Android, поэтому приложение хранит только санитизированную диагностику и честно показывает выбранный источник.
 
 ## Что уже реализовано
 
 - Android 11–16: `minSdk 30`, `targetSdk 36`.
 - Kotlin, native Views, без тяжёлого UI-фреймворка.
 - `NotificationListenerService`, фильтрующий настраиваемый package; по умолчанию `com.openai.chatgpt`.
-- Phase 0 probe для notification metadata, extras, BubbleMetadata, PendingIntent, Drawable, bitmap alpha и SHA-256.
+- Probe для notification metadata, extras, BubbleMetadata, PendingIntent, Drawable, bitmap alpha и SHA-256.
 - Поиск pet в порядке:
   1. `BubbleMetadata.icon`;
   2. AndroidX `MessagingStyle` Person icon;
@@ -23,11 +23,12 @@
 - Прозрачный `TYPE_APPLICATION_OVERLAY` с `PixelFormat.TRANSLUCENT`, без background, crop, badge, shadow и elevation.
 - Drag, безопасные границы экрана/cutout, snap к краю и отдельные позиции portrait/landscape.
 - Встроенный v2 Violet Vixen pack: 9 анимационных состояний и 16 направлений взгляда.
-- Single tap: компактная comic-style реплика, геометрически привязанная к pet; без большой панели.
-- При нескольких событиях реплики вращаются в одном стабильном окне; тап открывает именно соответствующий ChatGPT PendingIntent.
+- Single tap: компактные comic-style реплики, геометрически привязанные к pet; без большой панели.
+- До пяти реплик одновременно с независимым масштабом; при drag и edge snap существующие overlay-окна перемещаются через `updateViewLayout`, без remove/add на каждом кадре.
+- При большем числе событий страницы реплик автоматически ротируются; тап открывает именно соответствующий ChatGPT PendingIntent.
 - Общий быстрый выключатель авто-реплик действительно отключает и Codex, и обычные ChatGPT chat notifications.
 - Срок жизни контекста различается: chat/completed — таймер, running — пока активен, needs-input/error/disconnected — до разрешения или удаления notification.
-- Long press: ChatGPT, настройки, diagnostics или скрытие.
+- Long press: ChatGPT, настройки или скрытие.
 - Task parsing с приоритетом structured progress → ongoing flag → только затем текстовые эвристики.
 - Переход к задаче через `contentIntent` → bubble intent → launcher ChatGPT.
 - Девять исходных sprite-анимаций без transform-анимаций; native `Animatable` также запускается без системной маски.
@@ -37,17 +38,17 @@
 - Санитизированный JSON export. Полный notification text не входит в export ни в одном build type.
 - В manifest отсутствует `INTERNET`; нет analytics, telemetry, Firebase, ads или backend.
 
-## Быстрый запуск Phase 0
+## Быстрый запуск и проверка
 
-1. Установите `app-debug.apk` и откройте Codex Pet.
+1. Установите APK и откройте Codex Pet.
 2. Включите доступ к уведомлениям.
 3. Разрешите отображение поверх других приложений.
 4. На Android 13+ разрешите notification Codex Pet для foreground service.
 5. Запустите Codex Pet.
-6. В ChatGPT откройте Codex Remote или запустите задачу, чтобы появилась/обновилась bubble notification.
-7. Откройте `Diagnostics → ChatGPT notifications`, нажмите `Refresh active notifications` и сохраните sanitized JSON.
+6. В ChatGPT откройте Codex Remote или запустите задачу, чтобы появилась/обновилась notification.
+7. Для проверки источников откройте diagnostics, обновите активные notifications и при необходимости сохраните sanitized JSON.
 
-Успешный минимальный результат Phase 0:
+Успешный минимальный результат:
 
 - metadata/extras и доступные публичные icon candidates зафиксированы без текста переписки;
 - выбранный кандидат имеет alpha и проходит transparency gate;
@@ -90,11 +91,26 @@ flowchart TD
 - Android SDK Platform 36;
 - Android SDK Build Tools 35.0.0 или новее.
 
+Debug-проверка:
+
 ```bash
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-APK появится в `app/build/outputs/apk/debug/app-debug.apk`.
+Release candidate с R8/resource shrinking:
+
+```bash
+./gradlew assembleRelease
+```
+
+CI на pull request и non-main ветках собирает unsigned release candidate. На `main` используется production signing, если настроен полный набор secrets:
+
+- `CODEX_PET_KEYSTORE_BASE64`;
+- `CODEX_PET_KEYSTORE_PASSWORD`;
+- `CODEX_PET_KEY_ALIAS`;
+- `CODEX_PET_KEY_PASSWORD`.
+
+При наличии signing CI проверяет итоговый APK через `apksigner verify`; если signing не настроен, artifact явно публикуется как unsigned.
 
 ## HONOR X9c / MagicOS 9–10
 
@@ -104,7 +120,7 @@ APK появится в `app/build/outputs/apk/debug/app-debug.apk`.
 
 - Android notification API может содержать меньше задач, чем внутренняя activity-панель ChatGPT. Приложение не выдумывает отсутствующие задачи.
 - Официальная документация ChatGPT описывает desktop activity tray отдельно от системных notifications; равенство этих наборов данных не предполагается.
-- Отключение системных bubbles может повлиять на наличие `BubbleMetadata`; это проверяется отдельным шагом Phase 0.
+- Отключение системных bubbles может повлиять на наличие `BubbleMetadata`; это проверяется отдельным шагом диагностики.
 - Если ни один публичный icon source не содержит чистого pet, приложение показывает точную диагностическую причину и предлагает manual import. Accessibility, root и hooking намеренно отсутствуют.
 - Автозапуск после reboot — best effort: Android и MagicOS могут запретить background FGS start. Ошибка не приводит к crash; pet можно запустить из Activity.
 
@@ -116,6 +132,11 @@ APK появится в `app/build/outputs/apk/debug/app-debug.apk`.
 - [Android: foreground service types](https://developer.android.com/develop/background-work/services/fgs/service-types)
 - [Android: background FGS restrictions](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start)
 - [HONOR: keeping an app running in background](https://www.honor.com/global/support/content/en-us00406916/)
+
+## Release notes
+
+- [0.4.0](docs/releases/0.4.0.md)
+- [0.3.0-beta1](docs/releases/0.3.0-beta1.md)
 
 ## License
 
