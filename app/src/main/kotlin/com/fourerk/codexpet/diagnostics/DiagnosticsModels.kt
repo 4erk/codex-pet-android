@@ -80,5 +80,8 @@ data class ListenerDiagnostics(
     val activeNotificationCount: Int = 0,
     val lastConnectedAt: Long? = null,
     val lastEventAt: Long? = null,
+    val lastHeartbeatAt: Long? = null,
+    val consecutiveScanFailures: Int = 0,
+    val rebindAttempts: Int = 0,
     val lastError: String? = null,
 )

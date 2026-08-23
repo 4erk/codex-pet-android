@@ -49,6 +49,10 @@ class SettingsRepository(
         val speechStyle = stringPreferencesKey("speech_style")
         val maxVisibleBubbles = intPreferencesKey("max_visible_bubbles")
         val longPressAction = stringPreferencesKey("long_press_action")
+        val autoUpdateEnabled = booleanPreferencesKey("auto_update_enabled")
+        val autoDownloadUpdates = booleanPreferencesKey("auto_download_updates")
+        val updateWifiOnly = booleanPreferencesKey("update_wifi_only")
+        val lastUpdateCheckAt = longPreferencesKey("last_update_check_at")
         val lastPetHash = stringPreferencesKey("last_pet_hash")
         val lastPetUpdatedAt = longPreferencesKey("last_pet_updated_at")
         val lastPetAssetSource = stringPreferencesKey("last_pet_asset_source")
@@ -94,6 +98,10 @@ class SettingsRepository(
     suspend fun setSpeechStyle(value: SpeechStyle) = update(Keys.speechStyle, value.name)
     suspend fun setMaxVisibleBubbles(value: Int) = update(Keys.maxVisibleBubbles, value.coerceIn(1, 5))
     suspend fun setLongPressAction(value: LongPressAction) = update(Keys.longPressAction, value.name)
+    suspend fun setAutoUpdateEnabled(value: Boolean) = update(Keys.autoUpdateEnabled, value)
+    suspend fun setAutoDownloadUpdates(value: Boolean) = update(Keys.autoDownloadUpdates, value)
+    suspend fun setUpdateWifiOnly(value: Boolean) = update(Keys.updateWifiOnly, value)
+    suspend fun setLastUpdateCheckAt(value: Long) = update(Keys.lastUpdateCheckAt, value.coerceAtLeast(0L))
 
     suspend fun savePosition(orientation: Int, x: Int, y: Int) {
         context.codexPetDataStore.edit { preferences ->
@@ -155,6 +163,10 @@ class SettingsRepository(
         longPressAction = preferences[Keys.longPressAction]
             ?.let { runCatching { LongPressAction.valueOf(it) }.getOrNull() }
             ?: LongPressAction.MENU,
+        autoUpdateEnabled = preferences[Keys.autoUpdateEnabled] ?: true,
+        autoDownloadUpdates = preferences[Keys.autoDownloadUpdates] ?: true,
+        updateWifiOnly = preferences[Keys.updateWifiOnly] ?: true,
+        lastUpdateCheckAt = preferences[Keys.lastUpdateCheckAt] ?: 0L,
         lastPetHash = preferences[Keys.lastPetHash],
         lastPetUpdatedAt = preferences[Keys.lastPetUpdatedAt],
         lastPetAssetSource = preferences[Keys.lastPetAssetSource],
@@ -167,7 +179,7 @@ class SettingsRepository(
     }
 
     private companion object {
-        const val CURRENT_ANIMATION_ENGINE_VERSION = 2
+        const val CURRENT_ANIMATION_ENGINE_VERSION = 3
         val PACKAGE_PATTERN = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
     }
 }

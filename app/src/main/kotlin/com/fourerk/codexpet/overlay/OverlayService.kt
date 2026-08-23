@@ -13,13 +13,16 @@ import androidx.core.app.NotificationCompat
 import com.fourerk.codexpet.R
 import com.fourerk.codexpet.app.AppGraph
 import com.fourerk.codexpet.app.HomeActivity
+import com.fourerk.codexpet.notification.ChatGptNotificationListener
 import com.fourerk.codexpet.pet.PetAnimationState
 import com.fourerk.codexpet.settings.AppSettings
+import com.fourerk.codexpet.system.SystemAccess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -91,6 +94,20 @@ class OverlayService : Service() {
             launch { AppGraph.pets.visual.collectLatest(controller::setPet) }
             launch { AppGraph.tasks.tasks.collectLatest(controller::setTasks) }
             launch { AppGraph.tasks.transitions.collectLatest(controller::onTaskTransition) }
+            launch {
+                while (true) {
+                    if (SystemAccess.hasNotificationAccess(this@OverlayService)) {
+                        ChatGptNotificationListener.ensureHealthy(this@OverlayService)
+                    }
+                    delay(LISTENER_HEALTH_PULSE_MS)
+                }
+            }
+            launch {
+                while (true) {
+                    AppGraph.updates.checkIfDue()
+                    delay(UPDATE_PULSE_MS)
+                }
+            }
         }
     }
 
@@ -196,5 +213,7 @@ class OverlayService : Service() {
         const val EXTRA_ANIMATION_STATE = "animation_state"
         private const val CHANNEL_ID = "codex_pet_overlay"
         private const val NOTIFICATION_ID = 4101
+        private const val LISTENER_HEALTH_PULSE_MS = 30_000L
+        private const val UPDATE_PULSE_MS = 30L * 60L * 1_000L
     }
 }

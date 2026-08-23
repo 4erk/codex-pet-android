@@ -1,5 +1,6 @@
 package com.fourerk.codexpet.app
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.AdapterView
@@ -41,15 +42,13 @@ class SpeechSettingsActivity : AppCompatActivity() {
     }
 
     private fun buildContent(): View {
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(PetUi.dp(this@SpeechSettingsActivity, 18), PetUi.dp(this@SpeechSettingsActivity, 20), PetUi.dp(this@SpeechSettingsActivity, 18), PetUi.dp(this@SpeechSettingsActivity, 36))
-            setBackgroundColor(PetUi.BACKGROUND)
-        }
-        body.addView(PetUi.text(this, "Реплики", 28f, PetUi.TEXT, bold = true))
-        body.addView(PetUi.text(this, "Пет говорит коротко и по делу. При желании — вообще без перефразирования.", 14f, PetUi.MUTED))
+        val body = PetUi.page(
+            this,
+            "Реплики",
+            "Что пет говорит, когда всплывает, сколько показывает и как размещает несколько событий.",
+        )
 
-        val voiceCard = PetUi.card(this, "Как говорить")
+        val voiceCard = PetUi.card(this, "Текст")
         styleSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(
                 this@SpeechSettingsActivity,
@@ -62,43 +61,40 @@ class SpeechSettingsActivity : AppCompatActivity() {
         voiceCard.addView(styleExample)
         voiceCard.addView(PetUi.text(
             this,
-            "Живой режим не пересказывает содержимое обычных сообщений ChatGPT и не придумывает факты: он только заменяет сухой статус понятной вводной и оставляет исходную полезную часть после двоеточия. Точный режим показывает notification-текст как есть.",
+            "Живой режим меняет только короткую вводную, но сохраняет фактический payload уведомления. Обычные сообщения ChatGPT не перефразируются. Точный режим показывает исходный notification-текст.",
             12f,
             PetUi.MUTED,
         ))
         body.addView(voiceCard, PetUi.marginParams(this, 16))
 
-        val bubblesCard = PetUi.card(this, "Баблы")
+        val bubblesCard = PetUi.card(this, "Вид и плотность")
         bubbleScaleLabel = PetUi.text(this, "Масштаб баблов: 1.00×", 14f, PetUi.TEXT, bold = true)
         bubbleScaleSeek = SeekBar(this).apply { max = 75 }
         bubblesCard.addView(bubbleScaleLabel)
         bubblesCard.addView(bubbleScaleSeek)
-        bubblesCard.addView(PetUi.text(
-            this,
-            "Отдельно от размера пета. Масштабируются ширина, текст, отступы, скругление и хвост реплики; размещение автоматически остаётся в безопасной области экрана.",
-            12f,
-            PetUi.MUTED,
-        ))
         maxLabel = PetUi.text(this, "Одновременно: до 5 реплик", 14f, PetUi.TEXT, bold = true)
         maxSeek = SeekBar(this).apply { max = 4 }
         bubblesCard.addView(maxLabel)
         bubblesCard.addView(maxSeek)
         bubblesCard.addView(PetUi.text(
             this,
-            "Если значимых реплик больше лимита, они переключаются страницами. До лимита каждая реплика остаётся отдельным кликабельным баблом.",
+            "Размер бабла независим от размера пета. Хвост, ширина, текст и отступы адаптируются вместе; 1–5 значимых реплик показываются одновременно, overflow идёт страницами.",
             12f,
             PetUi.MUTED,
         ))
+        bubblesCard.addView(PetUi.primaryAction(this, "Открыть стенд 1–5 баблов") {
+            startActivity(Intent(this, BubbleLabActivity::class.java))
+        })
         body.addView(bubblesCard, PetUi.marginParams(this))
 
-        val autoCard = PetUi.card(this, "Что показывать автоматически")
-        val autoRow = PetUi.toggle(this, "Автоматические реплики", "Главный выключатель. При выключении нажатие на пета всё равно покажет актуальные реплики вручную.")
+        val autoCard = PetUi.card(this, "Автоматически")
+        val autoRow = PetUi.toggle(this, "Автоматические реплики", "Главный выключатель. Ручной тап по пету всё равно показывает актуальный контекст.")
         autoSwitch = PetUi.switchFrom(autoRow)
-        val attentionRow = PetUi.toggle(this, "То, что требует внимания", "Ответ, подтверждение, ошибка, потеря связи — остаются, пока ситуация не изменится.")
+        val attentionRow = PetUi.toggle(this, "Требует внимания", "Ответ, разрешение, ошибка и потеря связи остаются, пока ситуация не изменится.")
         attentionSwitch = PetUi.switchFrom(attentionRow)
-        val chatRow = PetUi.toggle(this, "Обычные сообщения ChatGPT", "Показываются как сообщения, а не как Codex-задачи.")
+        val chatRow = PetUi.toggle(this, "Обычные сообщения ChatGPT", "Короткие transient-реплики, которые не считаются Codex-задачами.")
         chatSwitch = PetUi.switchFrom(chatRow)
-        val completionRow = PetUi.toggle(this, "Завершение задачи", "Короткая реплика после успешного завершения.")
+        val completionRow = PetUi.toggle(this, "Успешное завершение", "Короткий результат; сама анимация успеха проигрывается один раз.")
         completionSwitch = PetUi.switchFrom(completionRow)
         completionLabel = PetUi.text(this, "Готово показывать: 5 сек.", 13f, PetUi.TEXT)
         completionSeek = SeekBar(this).apply { max = 30 }
@@ -110,10 +106,28 @@ class SpeechSettingsActivity : AppCompatActivity() {
         autoCard.addView(completionSeek)
         body.addView(autoCard, PetUi.marginParams(this))
 
+        body.addView(PetUi.card(this, "Приоритет").apply {
+            addView(PetUi.text(
+                this@SpeechSettingsActivity,
+                "Сначала показывается то, где нужен пользователь, затем блокировки/ошибки, затем готовый результат и текущая работа. Attention-события не исчезают по таймеру; завершения и обычные сообщения — исчезают.",
+                13f,
+                PetUi.MUTED,
+            ))
+        }, PetUi.marginParams(this))
+
+        body.addView(PetUi.card(this, "Переходы").apply {
+            addView(PetUi.navigationRow(this@SpeechSettingsActivity, "✦", "Анимации", "Как реплика влияет на реакцию пета") {
+                startActivity(Intent(this@SpeechSettingsActivity, AnimationSettingsActivity::class.java))
+            })
+            addView(PetUi.navigationRow(this@SpeechSettingsActivity, "↗", "Подключение", "Если реплики перестали обновляться") {
+                startActivity(Intent(this@SpeechSettingsActivity, IntegrationActivity::class.java))
+            })
+        }, PetUi.marginParams(this))
+
         body.addView(PetUi.card(this, "Открытие чата").apply {
             addView(PetUi.text(
                 this@SpeechSettingsActivity,
-                "Нажатие на конкретный бабл сначала использует PendingIntent именно этого уведомления ChatGPT. Если точного маршрута в уведомлении нет, приложение честно открывает сам ChatGPT, а не подделывает нестабильную внутреннюю ссылку.",
+                "Тап по конкретному баблу сначала использует PendingIntent именно этого уведомления ChatGPT. Если точного маршрута нет, открывается ChatGPT без подделки нестабильных внутренних URI.",
                 13f,
                 PetUi.MUTED,
             ))
@@ -190,7 +204,7 @@ class SpeechSettingsActivity : AppCompatActivity() {
                     chatSwitch.isChecked = settings.chatMessageBubblesEnabled
                     completionSwitch.isChecked = settings.completionBubblesEnabled
                     styleExample.text = if (settings.speechStyle == SpeechStyle.FRIENDLY) {
-                        "Пример: «Тут нужен ты: выбери вариант» · «Похоже, связь отвалилась: remote computer offline» · «Есть, сделал: тесты прошли»"
+                        "Пример: «Тут нужен ты: выбери вариант» · «Связь потерялась: remote computer offline» · «Есть, сделал: тесты прошли»"
                     } else {
                         "Пример: «Choose an option» · «Remote computer offline» · «All tests pass»"
                     }

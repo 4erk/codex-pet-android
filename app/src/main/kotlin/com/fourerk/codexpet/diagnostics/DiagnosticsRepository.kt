@@ -11,12 +11,16 @@ class DiagnosticsRepository {
     val snapshots = mutableSnapshots.asStateFlow()
 
     fun listenerConnected(sourcePackage: String, activeCount: Int) {
+        val now = System.currentTimeMillis()
         mutableListener.value = mutableListener.value.copy(
             connected = true,
             sourcePackage = sourcePackage,
             activeNotificationCount = activeCount,
-            lastConnectedAt = System.currentTimeMillis(),
-            lastEventAt = System.currentTimeMillis(),
+            lastConnectedAt = now,
+            lastEventAt = now,
+            lastHeartbeatAt = now,
+            consecutiveScanFailures = 0,
+            rebindAttempts = 0,
             lastError = null,
         )
     }
@@ -24,6 +28,36 @@ class DiagnosticsRepository {
     fun listenerDisconnected() {
         mutableListener.value = mutableListener.value.copy(
             connected = false,
+            lastEventAt = System.currentTimeMillis(),
+        )
+    }
+
+    fun listenerHeartbeat(activeCount: Int) {
+        val now = System.currentTimeMillis()
+        mutableListener.value = mutableListener.value.copy(
+            connected = true,
+            activeNotificationCount = activeCount,
+            lastHeartbeatAt = now,
+            lastEventAt = now,
+            consecutiveScanFailures = 0,
+        )
+    }
+
+    fun listenerScanFailed(message: String): Int {
+        val current = mutableListener.value
+        val failures = current.consecutiveScanFailures + 1
+        mutableListener.value = current.copy(
+            consecutiveScanFailures = failures,
+            lastError = message.take(240),
+            lastEventAt = System.currentTimeMillis(),
+        )
+        return failures
+    }
+
+    fun listenerRebindAttempt(attempt: Int) {
+        mutableListener.value = mutableListener.value.copy(
+            connected = false,
+            rebindAttempts = attempt,
             lastEventAt = System.currentTimeMillis(),
         )
     }

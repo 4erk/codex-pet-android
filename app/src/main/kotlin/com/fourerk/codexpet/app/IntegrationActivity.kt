@@ -1,5 +1,6 @@
 package com.fourerk.codexpet.app
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.EditText
@@ -28,46 +29,39 @@ class IntegrationActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (SystemAccess.hasNotificationAccess(this)) ChatGptNotificationListener.ensureHealthy(this)
         render()
     }
 
     private fun buildContent(): View {
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(PetUi.dp(this@IntegrationActivity, 18), PetUi.dp(this@IntegrationActivity, 20), PetUi.dp(this@IntegrationActivity, 18), PetUi.dp(this@IntegrationActivity, 36))
-            setBackgroundColor(PetUi.BACKGROUND)
-        }
-        body.addView(PetUi.text(this, "Подключение", 28f, PetUi.TEXT, bold = true))
-        body.addView(PetUi.text(this, "Уведомления ChatGPT, точные переходы в чаты и восстановление синхронизации.", 14f, PetUi.MUTED))
+        val body = PetUi.page(
+            this,
+            "Подключение",
+            "ChatGPT notifications, listener health и автоматическое восстановление.",
+        )
 
         val statusCard = PetUi.card(this, "Состояние")
         statusText = PetUi.text(this, "Проверяю…", 13f, PetUi.MUTED)
         statusCard.addView(statusText)
-        statusCard.addView(PetUi.action(this, "Пересинхронизировать сейчас") {
+        statusCard.addView(PetUi.primaryAction(this, "Проверить и пересинхронизировать") {
             ChatGptNotificationListener.refresh(this)
-            Toast.makeText(this, "Сверяю полный список активных уведомлений ChatGPT", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Сверяю activeNotifications и здоровье listener", Toast.LENGTH_SHORT).show()
         })
-        statusCard.addView(PetUi.action(this, "Переподключить listener") {
+        statusCard.addView(PetUi.action(this, "Принудительно переподключить") {
             ChatGptNotificationListener.restart(this)
         })
         body.addView(statusCard, PetUi.marginParams(this, 16))
 
         val accessCard = PetUi.card(this, "Системные доступы")
-        accessCard.addView(PetUi.action(this, "Доступ к уведомлениям") {
+        accessCard.addView(PetUi.navigationRow(this, "◉", "Доступ к уведомлениям", "Обязателен для состояния Codex") {
             SystemAccess.openNotificationListenerSettings(this)
         })
-        accessCard.addView(PetUi.action(this, "Отображение поверх приложений") {
+        accessCard.addView(PetUi.navigationRow(this, "◫", "Поверх приложений", "Прозрачный pet overlay") {
             SystemAccess.openOverlaySettings(this)
         })
-        accessCard.addView(PetUi.action(this, "Настройки bubbles ChatGPT") {
+        accessCard.addView(PetUi.navigationRow(this, "●", "Системные bubbles ChatGPT", "Можно отключить белый круг, уведомления оставить") {
             SystemAccess.openChatGptBubbleSettings(this, AppGraph.settings.settings.value.sourcePackage)
         })
-        accessCard.addView(PetUi.text(
-            this,
-            "Системные bubbles ChatGPT лучше отключить, чтобы не было второго белого круга. Сами уведомления ChatGPT оставьте включёнными — из них Codex Pet получает состояние и точные PendingIntent переходов.",
-            12f,
-            PetUi.MUTED,
-        ))
         body.addView(accessCard, PetUi.marginParams(this))
 
         val sourceCard = PetUi.card(this, "Источник ChatGPT")
@@ -86,37 +80,37 @@ class IntegrationActivity : AppCompatActivity() {
         })
         body.addView(sourceCard, PetUi.marginParams(this))
 
-        val syncCard = PetUi.card(this, "Если обновления иногда пропадают")
-        syncCard.addView(PetUi.text(
-            this,
-            "Теперь Codex Pet не полагается только на один callback. После posted/removed/ranking-change он делает короткую полную сверку activeNotifications, убирает лишний group summary при наличии реальных children и дополнительно сверяется раз в 10 секунд. После разрыва listener автоматически запрашивает rebind.",
-            13f,
-            PetUi.MUTED,
-        ))
-        syncCard.addView(PetUi.text(
-            this,
-            "Если Android/MagicOS всё равно не отдаёт часть типов уведомлений, проверьте настройки доступа к уведомлениям и фоновые ограничения самого Codex Pet — приложение не может прочитать notification, которое система вообще не передала listener'у.",
-            12f,
-            PetUi.MUTED,
-        ))
-        body.addView(syncCard, PetUi.marginParams(this))
+        body.addView(PetUi.card(this, "Самовосстановление").apply {
+            addView(PetUi.text(
+                this@IntegrationActivity,
+                "Listener теперь имеет heartbeat. Если activeNotifications несколько раз подряд недоступны, Codex Pet перестаёт доверять ложному состоянию «connected», делает unbind и повторяет requestRebind с backoff до восстановления. Параллельные старые reconcile больше не могут перезаписать свежий snapshot.",
+                13f,
+                PetUi.MUTED,
+            ))
+        }, PetUi.marginParams(this))
 
         if (SystemAccess.isHonorDevice()) {
             body.addView(PetUi.card(this, "HONOR / MagicOS").apply {
                 addView(PetUi.text(
                     this@IntegrationActivity,
-                    "Для стабильного listener/overlay отключите автоматическое управление запуском Codex Pet, разрешите автозапуск, косвенный запуск и работу в фоне. В оптимизации батареи выберите режим без ограничения.",
+                    "Для максимальной стабильности отключите автоматическое управление запуском Codex Pet и разрешите автозапуск, косвенный запуск и работу в фоне. Android всё равно может остановить процесс — listener теперь умеет это диагностировать и восстанавливаться.",
                     13f,
                     PetUi.MUTED,
                 ))
                 addView(PetUi.action(this@IntegrationActivity, "Настройки батареи") {
                     SystemAccess.openBatteryOptimizationSettings(this@IntegrationActivity)
                 })
-                addView(PetUi.action(this@IntegrationActivity, "Сведения о Codex Pet") {
-                    SystemAccess.openAppDetails(this@IntegrationActivity)
-                })
             }, PetUi.marginParams(this))
         }
+
+        body.addView(PetUi.card(this, "Дальше").apply {
+            addView(PetUi.navigationRow(this@IntegrationActivity, "⚙", "Фоновое поведение", "Автозапуск и жесты") {
+                startActivity(Intent(this@IntegrationActivity, BehaviorActivity::class.java))
+            })
+            addView(PetUi.navigationRow(this@IntegrationActivity, "?", "Диагностика", "Снимки notification metadata") {
+                startActivity(Intent(this@IntegrationActivity, DiagnosticsActivity::class.java))
+            })
+        }, PetUi.marginParams(this))
 
         return ScrollView(this).apply { addView(body) }
     }
@@ -140,10 +134,16 @@ class IntegrationActivity : AppCompatActivity() {
         val exact = tasks.count { it.hasExactOpenTarget() }
         statusText.text = buildString {
             append(if (SystemAccess.hasNotificationAccess(this@IntegrationActivity)) "✓ Доступ к уведомлениям" else "○ Нет доступа к уведомлениям")
-            append(if (listener.connected) "\n✓ Listener подключён" else "\n○ Listener сейчас не подключён")
-            append("\nСистема отдаёт активных ChatGPT notifications: ${listener.activeNotificationCount}")
-            append("\nПосле нормализации видно элементов: ${tasks.size}")
-            append(" · с точным переходом: $exact")
+            append(if (listener.connected) "\n✓ Listener отвечает" else "\n○ Listener восстанавливается")
+            listener.lastHeartbeatAt?.let {
+                append("\nHeartbeat: ${((System.currentTimeMillis() - it) / 1_000L).coerceAtLeast(0L)} сек назад")
+            }
+            append("\nАктивных ChatGPT notifications: ${listener.activeNotificationCount}")
+            append(" · нормализовано: ${tasks.size}")
+            append(" · точных переходов: $exact")
+            if (listener.consecutiveScanFailures > 0) append("\nОшибок скана подряд: ${listener.consecutiveScanFailures}")
+            if (listener.rebindAttempts > 0) append(" · rebind #${listener.rebindAttempts}")
+            listener.lastError?.let { append("\nПоследняя ошибка: $it") }
             append(if (SystemAccess.canDrawOverlays(this@IntegrationActivity)) "\n✓ Overlay разрешён" else "\n○ Overlay не разрешён")
         }
     }

@@ -83,4 +83,30 @@ class SpeechBubblePlacementTest {
         assertTrue(placements.first().y >= safe.top)
         assertTrue(placements.last().y + 90 <= safe.bottom)
     }
+
+    @Test
+    fun `five bubbles stay ordered non overlapping and inside screen`() {
+        val heights = listOf(72, 84, 76, 90, 80)
+        val placements = SpeechBubblePlacement.calculate(
+            safe = safe,
+            petX = 460,
+            petY = 780,
+            petSize = 96,
+            bubbleWidth = 260,
+            bubbleHeights = heights,
+            margin = 8,
+            gap = 7,
+        )
+
+        assertEquals(5, placements.size)
+        placements.forEachIndexed { index, placement ->
+            assertTrue(placement.x >= safe.left)
+            assertTrue(placement.x + 260 <= safe.right)
+            assertTrue(placement.y >= safe.top)
+            assertTrue(placement.y + heights[index] <= safe.bottom)
+            if (index > 0) {
+                assertTrue(placement.y >= placements[index - 1].y + heights[index - 1] + 7)
+            }
+        }
+    }
 }

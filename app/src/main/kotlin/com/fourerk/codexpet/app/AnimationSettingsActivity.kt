@@ -52,13 +52,11 @@ class AnimationSettingsActivity : AppCompatActivity() {
     }
 
     private fun buildContent(): View {
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(PetUi.dp(this@AnimationSettingsActivity, 18), PetUi.dp(this@AnimationSettingsActivity, 20), PetUi.dp(this@AnimationSettingsActivity, 18), PetUi.dp(this@AnimationSettingsActivity, 36))
-            setBackgroundColor(PetUi.BACKGROUND)
-        }
-        body.addView(PetUi.text(this, "Анимации", 28f, PetUi.TEXT, bold = true))
-        body.addView(PetUi.text(this, "Каждое состояние можно проверить отдельно и сразу понять, почему оно включается.", 14f, PetUi.MUTED))
+        val body = PetUi.page(
+            this,
+            "Анимации",
+            "Реакция выбирается по контексту задачи, а не по одному случайному слову.",
+        )
 
         val previewCard = PetUi.card(this, "Предпросмотр")
         preview = ImageView(this).apply {
@@ -68,7 +66,7 @@ class AnimationSettingsActivity : AppCompatActivity() {
         previewCard.addView(preview, LinearLayout.LayoutParams.MATCH_PARENT, PetUi.dp(this, 190))
         statusText = PetUi.text(this, "Загружаю pack…", 13f, PetUi.MUTED)
         previewCard.addView(statusText)
-        val enabledRow = PetUi.toggle(this, "Анимации включены", "Если системный масштаб анимаций Android выключен, пет остаётся на первом кадре.")
+        val enabledRow = PetUi.toggle(this, "Анимации включены", "Если системные animator scales Android отключены, остаётся первый кадр.")
         enabledSwitch = PetUi.switchFrom(enabledRow)
         previewCard.addView(enabledRow)
         speedLabel = PetUi.text(this, "Скорость: 1.00×", 13f, PetUi.TEXT)
@@ -77,7 +75,22 @@ class AnimationSettingsActivity : AppCompatActivity() {
         previewCard.addView(speedSeek)
         body.addView(previewCard, PetUi.marginParams(this, 16))
 
-        body.addView(PetUi.sectionTitle(this, "СОСТОЯНИЯ"))
+        body.addView(PetUi.card(this, "Как выбирается реакция").apply {
+            addView(PetUi.text(
+                this@AnimationSettingsActivity,
+                "Приоритет steady-состояний: нужен пользователь → ошибка/потеря связи → переподключение → проверка → обычная работа → idle. Успех, новое сообщение и восстановление связи — короткие one-shot реакции, поэтому старое completed-уведомление больше не удерживает пета в REVIEW.",
+                13f,
+                PetUi.MUTED,
+            ))
+            addView(PetUi.text(
+                this@AnimationSettingsActivity,
+                "Структурированный status/progress сильнее слабой текстовой эвристики. Явная ошибка не может исчезнуть из-за слова «building», но более конкретный новый этап вроде «now running tests» может уточнить обычное RUNNING.",
+                12f,
+                PetUi.MUTED,
+            ))
+        }, PetUi.marginParams(this))
+
+        body.addView(PetUi.sectionTitle(this, "Состояния"))
         PetAnimationCatalog.all.forEach { descriptor ->
             val card = PetUi.card(this, descriptor.title)
             card.addView(PetUi.text(this, descriptor.whenShort, 13f, PetUi.MUTED))
@@ -102,6 +115,18 @@ class AnimationSettingsActivity : AppCompatActivity() {
             card.addView(buttons)
             body.addView(card, PetUi.marginParams(this, 8))
         }
+
+        body.addView(PetUi.card(this, "Связанные сценарии").apply {
+            addView(PetUi.navigationRow(this@AnimationSettingsActivity, "💬", "Реплики", "Какие события вообще попадают к пету") {
+                startActivity(Intent(this@AnimationSettingsActivity, SpeechSettingsActivity::class.java))
+            })
+            addView(PetUi.navigationRow(this@AnimationSettingsActivity, "◫", "Стенд баблов", "Проверить 1–5 реплик рядом с текущим петом") {
+                startActivity(Intent(this@AnimationSettingsActivity, BubbleLabActivity::class.java))
+            })
+            addView(PetUi.navigationRow(this@AnimationSettingsActivity, "↗", "Listener и ChatGPT", "Источник состояний и восстановление") {
+                startActivity(Intent(this@AnimationSettingsActivity, IntegrationActivity::class.java))
+            })
+        }, PetUi.marginParams(this))
 
         return ScrollView(this).apply { addView(body) }
     }

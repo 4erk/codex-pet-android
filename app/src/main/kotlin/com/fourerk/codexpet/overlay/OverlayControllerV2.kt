@@ -41,6 +41,7 @@ import com.fourerk.codexpet.settings.AppSettings
 import com.fourerk.codexpet.settings.LongPressAction
 import com.fourerk.codexpet.system.TaskOpener
 import com.fourerk.codexpet.task.CodexTask
+import com.fourerk.codexpet.task.PetAnimationStateResolver
 import com.fourerk.codexpet.task.PetSpeechFormatter
 import com.fourerk.codexpet.task.PetSpeechItem
 import com.fourerk.codexpet.task.PetSpeechPolicy
@@ -60,7 +61,7 @@ import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
-/** Product UI controller used by the 0.4 overlay. The old controller is retained for rollback. */
+/** Product UI controller used by the stable overlay. The old controller is retained for rollback. */
 class OverlayControllerV2(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -104,7 +105,7 @@ class OverlayControllerV2(
     private var snapAnimator: ValueAnimator? = null
 
     private val speechRotationRunnable = Runnable {
-        if (!speechShown || speechItems.size <= currentPageLimit()) return@Runnable
+        if (!speechShown || speechItems.size <= renderedPageSize.coerceAtLeast(1)) return@Runnable
         advanceSpeechPage()
         renderSpeechWindows()
     }
@@ -262,12 +263,14 @@ class OverlayControllerV2(
 
     fun onTaskTransition(transition: TaskTransition) {
         val dominantState = taskAnimationState()
+        val recoveredConnection = transition.fromCue == TaskAnimationCue.DISCONNECTED ||
+            transition.fromCue == TaskAnimationCue.RECONNECTING
         when {
             transition.toCue == TaskAnimationCue.WAITING_FOR_INPUT ->
                 renderState(PetAnimationState.WAITING, force = true)
             transition.toCue == TaskAnimationCue.DISCONNECTED ||
                 transition.toCue == TaskAnimationCue.FAILED ||
-                transition.to == TaskStatus.ERROR -> renderState(
+                transition.to == TaskStatus.ERROR && transition.toCue != TaskAnimationCue.RECONNECTING -> renderState(
                     if (dominantState == PetAnimationState.WAITING) PetAnimationState.WAITING else PetAnimationState.FAILED,
                     force = true,
                 )
@@ -277,6 +280,11 @@ class OverlayControllerV2(
                 renderState(dominantState, force = true)
             transition.toCue == TaskAnimationCue.COMPLETED || transition.to == TaskStatus.COMPLETED ->
                 playOneShot(PetAnimationState.JUMPING)
+            recoveredConnection && transition.toCue in setOf(
+                TaskAnimationCue.ACTIVE,
+                TaskAnimationCue.REVIEWING,
+                TaskAnimationCue.UNKNOWN,
+            ) -> playOneShot(PetAnimationState.WAVING)
             transition.liveNotification && transition.kind == TaskKind.CHAT_MESSAGE ->
                 playOneShot(PetAnimationState.WAVING)
             else -> renderTaskAnimation()
@@ -292,6 +300,7 @@ class OverlayControllerV2(
         applySavedPosition(params, size)
         updatePetLayout()
         if (speechShown) renderSpeechWindows()
+        renderTaskAnimation(force = true)
     }
 
     fun showMoreSpeech() {
@@ -300,7 +309,7 @@ class OverlayControllerV2(
             showSpeech(manual = !settings.autoTaskBubblesEnabled)
             return
         }
-        if (speechItems.size > currentPageLimit()) {
+        if (speechItems.size > renderedPageSize.coerceAtLeast(1)) {
             advanceSpeechPage()
             renderSpeechWindows()
         }
@@ -393,8 +402,8 @@ class OverlayControllerV2(
                     } else {
                         savePosition()
                         finishSpeechMotion()
+                        renderTaskAnimation(force = true)
                     }
-                    renderTaskAnimation(force = true)
                 } else if (!longPressTriggered) {
                     view.performClick()
                     toggleSpeech()
@@ -513,7 +522,6 @@ class OverlayControllerV2(
 
         val page = currentPageItems()
         if (page.isEmpty()) return
-        renderedPageSize = page.size
         val metrics = speechMetrics(page)
         val safe = safeBounds()
         val petLayout = petParams ?: return
@@ -532,7 +540,15 @@ class OverlayControllerV2(
             )
         }
         val minimumHeight = dp((48f * bubbleScale).roundToInt().coerceIn(40, 72))
-        val heights = prepared.map { it.root.measuredHeight.coerceAtLeast(minimumHeight) }
+        val allHeights = prepared.map { it.root.measuredHeight.coerceAtLeast(minimumHeight) }
+        val fitCount = SpeechBubblePageFit.fittingCount(
+            heights = allHeights,
+            gap = gap,
+            availableHeight = safe.bottom - safe.top,
+        ).coerceIn(1, prepared.size)
+        val visiblePrepared = prepared.take(fitCount)
+        val heights = allHeights.take(fitCount)
+        renderedPageSize = fitCount
         val placements = SpeechBubblePlacement.calculate(
             safe = safe.toOverlayBounds(),
             petX = petLayout.x,
@@ -544,12 +560,12 @@ class OverlayControllerV2(
             gap = gap,
         )
 
-        prepared.zip(placements).forEach { (bubble, placement) ->
+        visiblePrepared.zip(placements).forEach { (bubble, placement) ->
             configureTail(bubble, placement.anchor.toTailEdge(), placement.tailOffset)
             addSpeechWindow(bubble, placement.x, placement.y)
         }
 
-        if (speechItems.size > currentPageLimit()) {
+        if (speechItems.size > renderedPageSize) {
             handler.postDelayed(speechRotationRunnable, SPEECH_PAGE_ROTATION_MS)
         }
     }
@@ -785,13 +801,19 @@ class OverlayControllerV2(
             })
         }
         addAction("Открыть текущий чат") { openBestCurrent() }
+        addAction("Настройки реплик") {
+            context.startActivity(
+                Intent(context, com.fourerk.codexpet.app.SpeechSettingsActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
         addAction("Настройки Codex Pet") {
             context.startActivity(Intent(context, HomeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
         addAction(context.getString(R.string.hide_pet), ::hidePet)
         val width = dp(230)
         val params = baseParams(width, WindowManager.LayoutParams.WRAP_CONTENT)
-        val placement = menuPlacement(width, dp(170))
+        val placement = menuPlacement(width, dp(215))
         params.x = placement.first
         params.y = placement.second
         runCatching { windowManager.addView(container, params) }
@@ -828,24 +850,7 @@ class OverlayControllerV2(
         renderState(taskAnimationState(), force)
     }
 
-    private fun taskAnimationState(): PetAnimationState {
-        val current = displayTasks().filter(CodexTask::isCodexTask)
-        return when {
-            current.any { it.animationCue == TaskAnimationCue.WAITING_FOR_INPUT } -> PetAnimationState.WAITING
-            current.any {
-                it.status == TaskStatus.ERROR ||
-                    it.animationCue == TaskAnimationCue.FAILED ||
-                    it.animationCue == TaskAnimationCue.DISCONNECTED
-            } -> PetAnimationState.FAILED
-            current.any { it.animationCue == TaskAnimationCue.RECONNECTING } -> PetAnimationState.WAITING
-            current.any { it.animationCue == TaskAnimationCue.REVIEWING } -> PetAnimationState.REVIEW
-            current.any { it.status == TaskStatus.COMPLETED || it.animationCue == TaskAnimationCue.COMPLETED } ->
-                PetAnimationState.REVIEW
-            current.any { it.status == TaskStatus.RUNNING || it.animationCue == TaskAnimationCue.ACTIVE } ->
-                PetAnimationState.RUNNING
-            else -> PetAnimationState.IDLE
-        }
-    }
+    private fun taskAnimationState(): PetAnimationState = PetAnimationStateResolver.resolve(displayTasks())
 
     private fun renderState(state: PetAnimationState, force: Boolean = false) {
         if (transientRunnable != null && !force) return
@@ -990,9 +995,14 @@ class OverlayControllerV2(
         if (params.x == target) {
             savePosition()
             finishSpeechMotion()
+            renderTaskAnimation(force = true)
             return
         }
 
+        renderState(
+            if (target < params.x) PetAnimationState.RUNNING_LEFT else PetAnimationState.RUNNING_RIGHT,
+            force = true,
+        )
         val animator = ValueAnimator.ofInt(params.x, target).apply {
             duration = 180L
         }
@@ -1007,6 +1017,7 @@ class OverlayControllerV2(
             override fun onAnimationCancel(animation: Animator) {
                 cancelled = true
                 if (snapAnimator === animation) snapAnimator = null
+                renderTaskAnimation(force = true)
             }
 
             override fun onAnimationEnd(animation: Animator) {
@@ -1014,6 +1025,7 @@ class OverlayControllerV2(
                 if (!cancelled) {
                     savePosition()
                     finishSpeechMotion()
+                    renderTaskAnimation(force = true)
                 }
             }
         })
@@ -1050,7 +1062,7 @@ class OverlayControllerV2(
     private fun repositionMenu() {
         val view = menuView ?: return
         val params = menuParams ?: return
-        val placement = menuPlacement(params.width, view.measuredHeight.takeIf { it > 0 } ?: dp(170))
+        val placement = menuPlacement(params.width, view.measuredHeight.takeIf { it > 0 } ?: dp(215))
         params.x = placement.first
         params.y = placement.second
         runCatching { windowManager.updateViewLayout(view, params) }

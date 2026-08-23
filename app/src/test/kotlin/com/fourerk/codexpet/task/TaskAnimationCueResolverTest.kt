@@ -17,9 +17,15 @@ class TaskAnimationCueResolverTest {
     }
 
     @Test
-    fun `english and russian failures map to failed even if notification is ongoing`() {
-        assertCue(TaskAnimationCue.FAILED, "Build failed", TaskStatus.RUNNING)
-        assertCue(TaskAnimationCue.FAILED, "Не удалось запустить тесты", TaskStatus.RUNNING)
+    fun `failures cannot be erased by a generic work verb`() {
+        assertCue(TaskAnimationCue.FAILED, "Build failed while building the release", TaskStatus.RUNNING)
+        assertCue(TaskAnimationCue.FAILED, "Не удалось запустить тесты, собирает диагностические данные", TaskStatus.RUNNING)
+    }
+
+    @Test
+    fun `explicit resume can recover a prior failure`() {
+        assertCue(TaskAnimationCue.ACTIVE, "Build failed. Retrying and continuing", TaskStatus.RUNNING)
+        assertCue(TaskAnimationCue.ACTIVE, "Сбой. Возобновляет работу", TaskStatus.RUNNING)
     }
 
     @Test
@@ -29,20 +35,26 @@ class TaskAnimationCueResolverTest {
     }
 
     @Test
-    fun `latest explicit action wins inside a multi-step status`() {
-        assertCue(TaskAnimationCue.REVIEWING, "Implemented the fix; now running tests")
-        assertCue(TaskAnimationCue.COMPLETED, "Проверяет сборку. Готово, тесты прошли")
+    fun `later specific workflow stage can refine running`() {
+        assertCue(TaskAnimationCue.REVIEWING, "Implemented the fix; now running tests", TaskStatus.RUNNING)
+        assertCue(TaskAnimationCue.COMPLETED, "Проверяет сборку. Готово, тесты прошли", TaskStatus.RUNNING)
     }
 
     @Test
-    fun `specific action heuristic refines a coarse structured state`() {
-        assertCue(TaskAnimationCue.REVIEWING, "Will review logs now", TaskStatus.ERROR)
-        assertCue(TaskAnimationCue.ACTIVE, "Preparing the next optional step", TaskStatus.COMPLETED)
+    fun `structured error and completion remain authoritative against weak text`() {
+        assertCue(TaskAnimationCue.FAILED, "Reviewing logs", TaskStatus.ERROR)
+        assertCue(TaskAnimationCue.COMPLETED, "Preparing the next optional step", TaskStatus.COMPLETED)
+    }
+
+    @Test
+    fun `strong connectivity and attention signals refine structured states`() {
+        assertCue(TaskAnimationCue.WAITING_FOR_INPUT, "User action required", TaskStatus.RUNNING)
+        assertCue(TaskAnimationCue.DISCONNECTED, "Remote computer is offline", TaskStatus.ERROR)
+        assertCue(TaskAnimationCue.RECONNECTING, "Connection lost. Trying to reconnect", TaskStatus.RUNNING)
     }
 
     @Test
     fun `broader situational phrases are bilingual`() {
-        assertCue(TaskAnimationCue.WAITING_FOR_INPUT, "User action required")
         assertCue(TaskAnimationCue.WAITING_FOR_INPUT, "Необходимо ваше действие")
         assertCue(TaskAnimationCue.FAILED, "Permission denied")
         assertCue(TaskAnimationCue.FAILED, "Нет доступа")
@@ -51,10 +63,9 @@ class TaskAnimationCueResolverTest {
     }
 
     @Test
-    fun `remote connectivity states are bilingual and use the latest state`() {
+    fun `remote connectivity states are bilingual`() {
         assertCue(TaskAnimationCue.DISCONNECTED, "Disconnected from the remote computer")
         assertCue(TaskAnimationCue.DISCONNECTED, "Нет связи с удалённым компьютером")
-        assertCue(TaskAnimationCue.RECONNECTING, "Connection lost. Trying to reconnect")
         assertCue(TaskAnimationCue.RECONNECTING, "Связь потеряна, переподключается")
     }
 
