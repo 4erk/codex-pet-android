@@ -41,4 +41,11 @@ class UpdateModelsTest {
 
         assertNull(selected)
     }
+
+    @Test
+    fun `manual APK policy accepts only a higher version code`() {
+        assertTrue(ManualApkPolicy.isUpgrade(candidateVersionCode = 7, currentVersionCode = 6))
+        assertFalse(ManualApkPolicy.isUpgrade(candidateVersionCode = 6, currentVersionCode = 6))
+        assertFalse(ManualApkPolicy.isUpgrade(candidateVersionCode = 5, currentVersionCode = 6))
+    }
 }
