@@ -38,6 +38,7 @@ internal object SpeechBubblePlacement {
         if (bubbleHeights.isEmpty()) return emptyList()
 
         val petCenterX = petX + petSize / 2
+        val petCenterY = petY + petSize / 2
         val totalHeight = bubbleHeights.sum() + gap * (bubbleHeights.size - 1).coerceAtLeast(0)
         val rightX = petX + petSize + margin
         val leftX = petX - bubbleWidth - margin
@@ -48,14 +49,15 @@ internal object SpeechBubblePlacement {
             val useRight = fitsRight && (!fitsLeft || petCenterX < (safe.left + safe.right) / 2)
             val x = if (useRight) rightX else leftX
             var y = if (bubbleHeights.size == 1) {
-                petY.coerceIn(safe.top, (safe.bottom - bubbleHeights.first()).coerceAtLeast(safe.top))
+                (petCenterY - bubbleHeights.first() / 2)
+                    .coerceIn(safe.top, (safe.bottom - bubbleHeights.first()).coerceAtLeast(safe.top))
             } else {
-                (petY + petSize / 2 - totalHeight / 2)
+                (petCenterY - totalHeight / 2)
                     .coerceIn(safe.top, (safe.bottom - totalHeight).coerceAtLeast(safe.top))
             }
             return bubbleHeights.mapIndexed { index, height ->
                 val targetY = if (bubbleHeights.size == 1) {
-                    petY + petSize / 2
+                    petCenterY
                 } else {
                     petY + (((index + 1f) / (bubbleHeights.size + 1f)) * petSize).roundToInt()
                 }
