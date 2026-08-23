@@ -41,6 +41,7 @@ import com.fourerk.codexpet.settings.AppSettings
 import com.fourerk.codexpet.settings.LongPressAction
 import com.fourerk.codexpet.system.TaskOpener
 import com.fourerk.codexpet.task.CodexTask
+import com.fourerk.codexpet.task.PetAnimationStateResolver
 import com.fourerk.codexpet.task.PetSpeechFormatter
 import com.fourerk.codexpet.task.PetSpeechItem
 import com.fourerk.codexpet.task.PetSpeechPolicy
@@ -51,7 +52,6 @@ import com.fourerk.codexpet.task.TaskKind
 import com.fourerk.codexpet.task.TaskStatus
 import com.fourerk.codexpet.task.TaskTransition
 import com.fourerk.codexpet.task.hasExactOpenTarget
-import com.fourerk.codexpet.task.isCodexTask
 import com.fourerk.codexpet.task.isDisplayTask
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -60,7 +60,7 @@ import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
-/** Product UI controller used by the 0.4 overlay. The old controller is retained for rollback. */
+/** Product overlay controller: stable windows, adaptive speech, and deterministic animation priority. */
 class OverlayControllerV2(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -262,6 +262,8 @@ class OverlayControllerV2(
 
     fun onTaskTransition(transition: TaskTransition) {
         val dominantState = taskAnimationState()
+        val recoveredConnection = transition.fromCue == TaskAnimationCue.DISCONNECTED ||
+            transition.fromCue == TaskAnimationCue.RECONNECTING
         when {
             transition.toCue == TaskAnimationCue.WAITING_FOR_INPUT ->
                 renderState(PetAnimationState.WAITING, force = true)
@@ -277,6 +279,11 @@ class OverlayControllerV2(
                 renderState(dominantState, force = true)
             transition.toCue == TaskAnimationCue.COMPLETED || transition.to == TaskStatus.COMPLETED ->
                 playOneShot(PetAnimationState.JUMPING)
+            recoveredConnection && transition.toCue in setOf(
+                TaskAnimationCue.ACTIVE,
+                TaskAnimationCue.REVIEWING,
+                TaskAnimationCue.UNKNOWN,
+            ) -> playOneShot(PetAnimationState.WAVING)
             transition.liveNotification && transition.kind == TaskKind.CHAT_MESSAGE ->
                 playOneShot(PetAnimationState.WAVING)
             else -> renderTaskAnimation()
@@ -292,6 +299,7 @@ class OverlayControllerV2(
         applySavedPosition(params, size)
         updatePetLayout()
         if (speechShown) renderSpeechWindows()
+        renderTaskAnimation(force = true)
     }
 
     fun showMoreSpeech() {
@@ -393,8 +401,8 @@ class OverlayControllerV2(
                     } else {
                         savePosition()
                         finishSpeechMotion()
+                        renderTaskAnimation(force = true)
                     }
-                    renderTaskAnimation(force = true)
                 } else if (!longPressTriggered) {
                     view.performClick()
                     toggleSpeech()
@@ -828,24 +836,7 @@ class OverlayControllerV2(
         renderState(taskAnimationState(), force)
     }
 
-    private fun taskAnimationState(): PetAnimationState {
-        val current = displayTasks().filter(CodexTask::isCodexTask)
-        return when {
-            current.any { it.animationCue == TaskAnimationCue.WAITING_FOR_INPUT } -> PetAnimationState.WAITING
-            current.any {
-                it.status == TaskStatus.ERROR ||
-                    it.animationCue == TaskAnimationCue.FAILED ||
-                    it.animationCue == TaskAnimationCue.DISCONNECTED
-            } -> PetAnimationState.FAILED
-            current.any { it.animationCue == TaskAnimationCue.RECONNECTING } -> PetAnimationState.WAITING
-            current.any { it.animationCue == TaskAnimationCue.REVIEWING } -> PetAnimationState.REVIEW
-            current.any { it.status == TaskStatus.COMPLETED || it.animationCue == TaskAnimationCue.COMPLETED } ->
-                PetAnimationState.REVIEW
-            current.any { it.status == TaskStatus.RUNNING || it.animationCue == TaskAnimationCue.ACTIVE } ->
-                PetAnimationState.RUNNING
-            else -> PetAnimationState.IDLE
-        }
-    }
+    private fun taskAnimationState(): PetAnimationState = PetAnimationStateResolver.resolve(displayTasks())
 
     private fun renderState(state: PetAnimationState, force: Boolean = false) {
         if (transientRunnable != null && !force) return
@@ -990,9 +981,14 @@ class OverlayControllerV2(
         if (params.x == target) {
             savePosition()
             finishSpeechMotion()
+            renderTaskAnimation(force = true)
             return
         }
 
+        renderState(
+            if (target < params.x) PetAnimationState.RUNNING_LEFT else PetAnimationState.RUNNING_RIGHT,
+            force = true,
+        )
         val animator = ValueAnimator.ofInt(params.x, target).apply {
             duration = 180L
         }
@@ -1007,6 +1003,7 @@ class OverlayControllerV2(
             override fun onAnimationCancel(animation: Animator) {
                 cancelled = true
                 if (snapAnimator === animation) snapAnimator = null
+                renderTaskAnimation(force = true)
             }
 
             override fun onAnimationEnd(animation: Animator) {
@@ -1014,6 +1011,7 @@ class OverlayControllerV2(
                 if (!cancelled) {
                     savePosition()
                     finishSpeechMotion()
+                    renderTaskAnimation(force = true)
                 }
             }
         })
