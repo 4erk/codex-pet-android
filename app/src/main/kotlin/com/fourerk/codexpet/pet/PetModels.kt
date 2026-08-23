@@ -8,9 +8,27 @@ enum class PetSource {
     BUBBLE_ICON,
     CONVERSATION_PERSON_ICON,
     LARGE_ICON,
+    SPRITE_SHEET_IMPORT,
     MANUAL_IMPORT,
     CACHE,
 }
+
+enum class PetAnimationState {
+    IDLE,
+    RUNNING_RIGHT,
+    RUNNING_LEFT,
+    WAVING,
+    JUMPING,
+    FAILED,
+    WAITING,
+    RUNNING,
+    REVIEW,
+}
+
+data class PetFrameSequence(
+    val frames: List<Bitmap>,
+    val frameDurationsMs: List<Int>,
+)
 
 data class PetCandidate(
     val source: PetSource,
@@ -32,4 +50,6 @@ data class PetVisual(
     val source: PetSource,
     val updatedAt: Long,
     val hasMeaningfulTransparency: Boolean,
+    val frameSequences: Map<PetAnimationState, PetFrameSequence> = emptyMap(),
+    val lookDirections: List<Bitmap> = emptyList(),
 )

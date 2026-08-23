@@ -50,7 +50,14 @@ class PetAssetProvider(private val context: Context) {
         }
         return PetInspection(
             candidates = candidates,
-            selected = candidates.firstOrNull { it.diagnostics.acceptedForOverlay },
+            selected = candidates
+                .filter { it.diagnostics.acceptedForOverlay }
+                .minWithOrNull(
+                    compareBy<PetCandidate> { it.source.ordinal }
+                        .thenByDescending { candidate ->
+                            candidate.bitmap.width.toLong() * candidate.bitmap.height
+                        },
+                ),
             notes = notes,
         )
     }
@@ -124,6 +131,14 @@ class PetAssetProvider(private val context: Context) {
     private fun renderDrawable(original: Drawable): RenderedDrawable? {
         val adaptive = original as? AdaptiveIconDrawable
         val drawable = (adaptive?.foreground ?: original).mutate()
+        if (adaptive == null && drawable is BitmapDrawable && drawable.bitmap.config != Bitmap.Config.HARDWARE) {
+            // Keep the exact 192x208 cell exposed by ChatGPT. Drawing it into another bitmap first
+            // adds an unnecessary resampling pass and makes the scaled overlay visibly softer.
+            drawable.setTargetDensity(context.resources.displayMetrics)
+            drawable.isFilterBitmap = true
+            drawable.paint.isDither = true
+            return RenderedDrawable(drawable, drawable.bitmap, adaptiveForegroundExtracted = false)
+        }
         val sourceWidth = when (drawable) {
             is BitmapDrawable -> drawable.bitmap.width
             else -> drawable.intrinsicWidth
@@ -142,6 +157,11 @@ class PetAssetProvider(private val context: Context) {
             drawable.setBounds(0, 0, width, height)
             drawable.draw(Canvas(bitmap))
             drawable.bounds = oldBounds
+            (drawable as? BitmapDrawable)?.apply {
+                setTargetDensity(context.resources.displayMetrics)
+                isFilterBitmap = true
+                paint.isDither = true
+            }
             RenderedDrawable(drawable, bitmap, adaptive != null)
         }.getOrNull()
     }

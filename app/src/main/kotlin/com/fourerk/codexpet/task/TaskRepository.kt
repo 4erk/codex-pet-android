@@ -24,11 +24,26 @@ class TaskRepository(scope: CoroutineScope) {
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     @Synchronized
-    fun upsert(task: CodexTask) {
+    fun upsert(task: CodexTask, liveNotification: Boolean = false) {
         val previous = byNotification.value[task.sourceNotificationKey]
+        if (previous != null && previous.hasSameVisibleContent(task)) return
         byNotification.value = byNotification.value + (task.sourceNotificationKey to task)
-        if (previous != null && previous.status != task.status) {
-            mutableTransitions.tryEmit(TaskTransition(task.id, previous.status, task.status))
+        val liveChatEvent = liveNotification && task.kind == TaskKind.CHAT_MESSAGE
+        if ((previous != null &&
+                (previous.status != task.status || previous.animationCue != task.animationCue)) ||
+            liveChatEvent
+        ) {
+            mutableTransitions.tryEmit(
+                TaskTransition(
+                    taskId = task.id,
+                    from = previous?.status,
+                    to = task.status,
+                    fromCue = previous?.animationCue ?: TaskAnimationCue.UNKNOWN,
+                    toCue = task.animationCue,
+                    kind = task.kind,
+                    liveNotification = liveChatEvent,
+                ),
+            )
         }
     }
 
@@ -40,12 +55,28 @@ class TaskRepository(scope: CoroutineScope) {
     @Synchronized
     fun replaceAll(newTasks: List<CodexTask>) {
         val old = byNotification.value
-        val replacement = newTasks.associateBy(CodexTask::sourceNotificationKey)
+        val replacement = newTasks
+            .associateBy(CodexTask::sourceNotificationKey)
+            .mapValues { (key, task) ->
+                old[key]?.takeIf { it.hasSameVisibleContent(task) } ?: task
+            }
+        if (old == replacement) return
         byNotification.value = replacement
         replacement.forEach { (key, task) ->
             val prior = old[key]
-            if (prior != null && prior.status != task.status) {
-                mutableTransitions.tryEmit(TaskTransition(task.id, prior.status, task.status))
+            if (prior != null &&
+                (prior.status != task.status || prior.animationCue != task.animationCue)
+            ) {
+                mutableTransitions.tryEmit(
+                    TaskTransition(
+                        taskId = task.id,
+                        from = prior.status,
+                        to = task.status,
+                        fromCue = prior.animationCue,
+                        toCue = task.animationCue,
+                        kind = task.kind,
+                    ),
+                )
             }
         }
     }

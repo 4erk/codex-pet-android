@@ -8,6 +8,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.fourerk.codexpet.BuildConfig
 import com.fourerk.codexpet.app.AppGraph
+import com.fourerk.codexpet.task.TaskKind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -63,7 +64,7 @@ class ChatGptNotificationListener : NotificationListenerService() {
     private fun process(sbn: StatusBarNotification, event: String, updateTask: Boolean, acceptPet: Boolean) {
         AppGraph.applicationScope.launch {
             val parsed = parse(sbn, event, acceptPet) ?: return@launch
-            if (updateTask) AppGraph.tasks.upsert(parsed.task)
+            if (updateTask) AppGraph.tasks.upsert(parsed.task, liveNotification = event == "POSTED")
             updateActiveCount()
         }
     }
@@ -82,7 +83,7 @@ class ChatGptNotificationListener : NotificationListenerService() {
                 includeDebugText = BuildConfig.DEBUG,
             )
             AppGraph.diagnostics.record(parsed.snapshot)
-            if (acceptPet) inspection.selected?.let {
+            if (acceptPet && parsed.task.kind != TaskKind.CHAT_MESSAGE) inspection.selected?.let {
                 AppGraph.pets.acceptAutoCandidate(it, sbn.packageName)
             }
             parsed
