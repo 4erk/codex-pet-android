@@ -35,7 +35,7 @@ class PetSettingsActivity : AppCompatActivity() {
         lifecycleScope.launch {
             AppGraph.pets.importManual(uri)
                 .onSuccess { pet ->
-                    val type = if (pet.frameSequences.isNotEmpty()) "pet pack" else "изображение"
+                    val type = if (pet.frameSequences.isNotEmpty()) "набор питомца" else "изображение"
                     Toast.makeText(this@PetSettingsActivity, "Импортирован $type", Toast.LENGTH_SHORT).show()
                 }
                 .onFailure {
@@ -55,7 +55,7 @@ class PetSettingsActivity : AppCompatActivity() {
         val body = PetUi.page(
             this,
             "Питомец",
-            "Внешность, реальный размер на экране и поведение overlay.",
+            "Внешность, размер на экране и поведение поверх других приложений.",
         )
 
         val hero = PetUi.heroCard(this)
@@ -81,13 +81,13 @@ class PetSettingsActivity : AppCompatActivity() {
                 PetUi.text(this@PetSettingsActivity, "Размер", 14.5f, PetUi.TEXT, bold = true),
                 LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
             )
-            sizeValue = PetUi.valuePill(this@PetSettingsActivity, "72 dp")
+            sizeValue = PetUi.valuePill(this@PetSettingsActivity, "72")
             addView(sizeValue)
         }
         hero.addView(sizeHeader)
         sizeSeek = SeekBar(this).apply { max = 112 }
         hero.addView(sizeSeek)
-        hero.addView(PetUi.helper(this, "Размер меняется прямо в предпросмотре и соответствует размеру overlay в dp."))
+        hero.addView(PetUi.helper(this, "Размер меняется сразу в предпросмотре. После отпускания ползунка он применяется к питомцу на экране."))
         body.addView(hero, PetUi.marginParams(this, 16))
 
         body.addView(PetUi.sectionTitle(this, "Образ"))
@@ -106,23 +106,23 @@ class PetSettingsActivity : AppCompatActivity() {
             addView(PetUi.action(this@PetSettingsActivity, "Обновить из ChatGPT") {
                 ChatGptNotificationListener.refresh(this@PetSettingsActivity)
             }, PetUi.marginParams(this@PetSettingsActivity, 8))
-            addView(PetUi.helper(this@PetSettingsActivity, "ZIP/spritesheet — основной источник полного pack. Notification icon остаётся только fallback."))
+            addView(PetUi.helper(this@PetSettingsActivity, "ZIP или спрайт-лист дают полный набор анимаций. Иконка из уведомления ChatGPT используется только как запасной вариант."))
         }, PetUi.marginParams(this, 4))
 
         body.addView(PetUi.sectionTitle(this, "На экране"))
         val screen = PetUi.card(this)
-        val snapRow = PetUi.toggle(this, "Прилипать к краю", "После drag пет плавно доезжает до ближайшего края; баблы остаются прикреплены.")
+        val snapRow = PetUi.toggle(this, "Прилипать к краю", "После перетаскивания питомец плавно доезжает до ближайшего края; реплики остаются рядом с ним.")
         snapSwitch = PetUi.switchFrom(snapRow)
         screen.addView(snapRow)
         PetUi.addDivider(screen, this)
-        screen.addView(PetUi.navigationRow(this, "⌁", "Поведение", "Жесты, автозапуск и фон") {
+        screen.addView(PetUi.navigationRow(this, "⌁", "Поведение", "Жесты, автозапуск и работа в фоне") {
             startActivity(Intent(this@PetSettingsActivity, BehaviorActivity::class.java))
         })
         body.addView(screen, PetUi.marginParams(this, 4))
 
         body.addView(PetUi.sectionTitle(this, "Связано"))
         body.addView(PetUi.card(this).apply {
-            addView(PetUi.navigationRow(this@PetSettingsActivity, "◰", "Реплики", "Масштаб и живой preview бабла") {
+            addView(PetUi.navigationRow(this@PetSettingsActivity, "◰", "Реплики", "Масштаб и живой предпросмотр") {
                 startActivity(Intent(this@PetSettingsActivity, SpeechSettingsActivity::class.java))
             })
             PetUi.addDivider(this, this@PetSettingsActivity)
@@ -130,7 +130,7 @@ class PetSettingsActivity : AppCompatActivity() {
                 startActivity(Intent(this@PetSettingsActivity, AnimationSettingsActivity::class.java))
             })
             PetUi.addDivider(this, this@PetSettingsActivity)
-            addView(PetUi.navigationRow(this@PetSettingsActivity, "▱", "Стенд", "Проверка 1–5 баблов") {
+            addView(PetUi.navigationRow(this@PetSettingsActivity, "▱", "Стенд", "Проверка 1–5 реплик") {
                 startActivity(Intent(this@PetSettingsActivity, BubbleLabActivity::class.java))
             })
         }, PetUi.marginParams(this, 4))
@@ -147,7 +147,7 @@ class PetSettingsActivity : AppCompatActivity() {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                 if (!fromUser) return
                 val size = progress + 48
-                sizeValue.text = "$size dp"
+                sizeValue.text = size.toString()
                 renderPetPreview(size)
             }
 
@@ -169,7 +169,7 @@ class PetSettingsActivity : AppCompatActivity() {
                     AppGraph.settings.settings.collect { settings ->
                         binding = true
                         sizeSeek.progress = settings.petSizeDp - 48
-                        sizeValue.text = "${settings.petSizeDp} dp"
+                        sizeValue.text = settings.petSizeDp.toString()
                         snapSwitch.isChecked = settings.snapEnabled
                         binding = false
                         renderPetPreview(settings.petSizeDp)
@@ -180,8 +180,8 @@ class PetSettingsActivity : AppCompatActivity() {
                         preview.setImageBitmap(pet?.bitmap)
                         sourceText.text = when {
                             pet == null -> "Питомец не загружен"
-                            pet.source == PetSource.BUILT_IN -> "Встроенный pack · ${pet.frameSequences.size}/9 анимаций"
-                            pet.frameSequences.isNotEmpty() -> "Импортированный pack · ${pet.frameSequences.size}/9 анимаций"
+                            pet.source == PetSource.BUILT_IN -> "Встроенный набор · ${pet.frameSequences.size}/9 анимаций"
+                            pet.frameSequences.isNotEmpty() -> "Импортированный набор · ${pet.frameSequences.size}/9 анимаций"
                             else -> "Статичное изображение"
                         }
                     }
