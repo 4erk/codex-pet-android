@@ -3,7 +3,6 @@ package com.fourerk.codexpet.app
 import android.content.Intent
 import android.os.Bundle
 import android.widget.EditText
-import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -46,11 +45,19 @@ class IntegrationActivity : AppCompatActivity() {
         }
         statusCard.addView(statusText)
         statusCard.addView(PetUi.primaryAction(this, "Проверить") {
-            ChatGptNotificationListener.refresh(this)
-            Toast.makeText(this, "Проверяю уведомления и подключение", Toast.LENGTH_SHORT).show()
+            if (SystemAccess.hasNotificationAccess(this)) {
+                ChatGptNotificationListener.refresh(this)
+                Toast.makeText(this, "Проверяю уведомления и подключение", Toast.LENGTH_SHORT).show()
+            } else {
+                SystemAccess.openNotificationListenerSettings(this)
+            }
         })
         statusCard.addView(PetUi.action(this, "Переподключить") {
-            ChatGptNotificationListener.restart(this)
+            if (SystemAccess.hasNotificationAccess(this)) {
+                ChatGptNotificationListener.restart(this)
+            } else {
+                SystemAccess.openNotificationListenerSettings(this)
+            }
         }, PetUi.marginParams(this, 8))
         body.addView(statusCard, PetUi.marginParams(this, 16))
 
@@ -68,25 +75,6 @@ class IntegrationActivity : AppCompatActivity() {
             SystemAccess.openChatGptBubbleSettings(this, AppGraph.settings.settings.value.sourcePackage)
         })
         body.addView(accessCard, PetUi.marginParams(this, 4))
-
-        body.addView(PetUi.sectionTitle(this, "Источник"))
-        val sourceCard = PetUi.card(this)
-        sourcePackage = EditText(this).apply {
-            setTextColor(PetUi.TEXT)
-            setHintTextColor(PetUi.MUTED)
-            hint = "com.openai.chatgpt"
-            isSingleLine = true
-            backgroundTintList = android.content.res.ColorStateList.valueOf(PetUi.ACCENT)
-        }
-        sourceCard.addView(sourcePackage)
-        sourceCard.addView(PetUi.action(this, "Сохранить") {
-            lifecycleScope.launch {
-                AppGraph.settings.setSourcePackage(sourcePackage.text.toString())
-                ChatGptNotificationListener.refresh(this@IntegrationActivity)
-            }
-        }, PetUi.marginParams(this, 8))
-        sourceCard.addView(PetUi.helper(this, "Обычно менять не нужно. По умолчанию используется официальное приложение ChatGPT."))
-        body.addView(sourceCard, PetUi.marginParams(this, 4))
 
         if (SystemAccess.isHonorDevice()) {
             body.addView(PetUi.sectionTitle(this, "HONOR / MagicOS"))
@@ -108,6 +96,26 @@ class IntegrationActivity : AppCompatActivity() {
                 startActivity(Intent(this@IntegrationActivity, DiagnosticsActivity::class.java))
             })
         }, PetUi.marginParams(this, 4))
+
+        body.addView(PetUi.sectionTitle(this, "Дополнительно"))
+        val sourceCard = PetUi.card(this)
+        sourceCard.addView(PetUi.text(this, "Приложение ChatGPT", 14.5f, PetUi.TEXT, bold = true))
+        sourcePackage = EditText(this).apply {
+            setTextColor(PetUi.TEXT)
+            setHintTextColor(PetUi.MUTED)
+            hint = "com.openai.chatgpt"
+            isSingleLine = true
+            backgroundTintList = android.content.res.ColorStateList.valueOf(PetUi.ACCENT)
+        }
+        sourceCard.addView(sourcePackage)
+        sourceCard.addView(PetUi.action(this, "Сохранить") {
+            lifecycleScope.launch {
+                AppGraph.settings.setSourcePackage(sourcePackage.text.toString())
+                ChatGptNotificationListener.refresh(this@IntegrationActivity)
+            }
+        }, PetUi.marginParams(this, 8))
+        sourceCard.addView(PetUi.helper(this, "Обычно менять не нужно. Этот параметр полезен только для другой сборки приложения ChatGPT."))
+        body.addView(sourceCard, PetUi.marginParams(this, 4))
 
         return ScrollView(this).apply {
             isFillViewport = true
@@ -131,20 +139,29 @@ class IntegrationActivity : AppCompatActivity() {
         val settings = AppGraph.settings.settings.value
         val listener = AppGraph.diagnostics.listener.value
         val tasks = AppGraph.tasks.tasks.value
+        val notificationAccess = SystemAccess.hasNotificationAccess(this)
         if (!sourcePackage.hasFocus()) sourcePackage.setText(settings.sourcePackage)
         val exact = tasks.count { it.hasExactOpenTarget() }
         statusText.text = buildString {
-            append(if (SystemAccess.hasNotificationAccess(this@IntegrationActivity)) "Уведомления: разрешены" else "Уведомления: нет доступа")
-            append(if (listener.connected) "\nПодключение: работает" else "\nПодключение: восстанавливается")
-            listener.lastHeartbeatAt?.let {
-                append("\nПоследняя успешная проверка: ${((System.currentTimeMillis() - it) / 1_000L).coerceAtLeast(0L)} сек назад")
+            append(if (notificationAccess) "Уведомления: разрешены" else "Уведомления: нет доступа")
+            append(
+                when {
+                    !notificationAccess -> "\nПодключение: ожидает разрешения"
+                    listener.connected -> "\nПодключение: работает"
+                    else -> "\nПодключение: восстанавливается"
+                },
+            )
+            if (notificationAccess) {
+                listener.lastHeartbeatAt?.let {
+                    append("\nПоследняя успешная проверка: ${((System.currentTimeMillis() - it) / 1_000L).coerceAtLeast(0L)} с назад")
+                }
+                append("\nУведомлений ChatGPT: ${listener.activeNotificationCount}")
+                append(" · задач: ${tasks.size}")
+                append(" · прямых переходов: $exact")
+                if (listener.consecutiveScanFailures > 0) append("\nОшибок подряд: ${listener.consecutiveScanFailures}")
+                if (listener.rebindAttempts > 0) append(" · попыток переподключения: ${listener.rebindAttempts}")
+                listener.lastError?.let { append("\nПоследняя ошибка: $it") }
             }
-            append("\nУведомлений ChatGPT: ${listener.activeNotificationCount}")
-            append(" · задач: ${tasks.size}")
-            append(" · точных переходов: $exact")
-            if (listener.consecutiveScanFailures > 0) append("\nОшибок подряд: ${listener.consecutiveScanFailures}")
-            if (listener.rebindAttempts > 0) append(" · попыток переподключения: ${listener.rebindAttempts}")
-            listener.lastError?.let { append("\nПоследняя ошибка: $it") }
             append(if (SystemAccess.canDrawOverlays(this@IntegrationActivity)) "\nПоверх окон: разрешено" else "\nПоверх окон: нет доступа")
         }
     }
