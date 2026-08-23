@@ -1,5 +1,10 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
 val releaseKeystorePath = System.getenv("CODEX_PET_KEYSTORE_PATH")
 val releaseKeystorePassword = System.getenv("CODEX_PET_KEYSTORE_PASSWORD")
 val releaseKeyAlias = System.getenv("CODEX_PET_KEY_ALIAS")
@@ -10,11 +15,6 @@ val hasReleaseSigning = listOf(
     releaseKeyAlias,
     releaseKeyPassword,
 ).all { !it.isNullOrBlank() }
-
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-}
 
 android {
     namespace = "com.fourerk.codexpet"
