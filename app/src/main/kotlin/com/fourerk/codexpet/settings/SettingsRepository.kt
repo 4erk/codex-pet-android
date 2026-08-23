@@ -45,6 +45,8 @@ class SettingsRepository(
         val attentionBubblesEnabled = booleanPreferencesKey("attention_bubbles_enabled")
         val chatMessageBubblesEnabled = booleanPreferencesKey("chat_message_bubbles_enabled")
         val completionBubblesEnabled = booleanPreferencesKey("completion_bubbles_enabled")
+        val speechStyle = stringPreferencesKey("speech_style")
+        val maxVisibleBubbles = intPreferencesKey("max_visible_bubbles")
         val longPressAction = stringPreferencesKey("long_press_action")
         val lastPetHash = stringPreferencesKey("last_pet_hash")
         val lastPetUpdatedAt = longPreferencesKey("last_pet_updated_at")
@@ -65,7 +67,6 @@ class SettingsRepository(
         scope.launch {
             context.codexPetDataStore.edit { preferences ->
                 if ((preferences[Keys.animationEngineVersion] ?: 0) < CURRENT_ANIMATION_ENGINE_VERSION) {
-                    // Earlier builds used transform motion; v2 uses only source sprite frames.
                     preferences[Keys.animationsEnabled] = true
                     preferences[Keys.animationEngineVersion] = CURRENT_ANIMATION_ENGINE_VERSION
                 }
@@ -88,6 +89,8 @@ class SettingsRepository(
     suspend fun setAttentionBubblesEnabled(value: Boolean) = update(Keys.attentionBubblesEnabled, value)
     suspend fun setChatMessageBubblesEnabled(value: Boolean) = update(Keys.chatMessageBubblesEnabled, value)
     suspend fun setCompletionBubblesEnabled(value: Boolean) = update(Keys.completionBubblesEnabled, value)
+    suspend fun setSpeechStyle(value: SpeechStyle) = update(Keys.speechStyle, value.name)
+    suspend fun setMaxVisibleBubbles(value: Int) = update(Keys.maxVisibleBubbles, value.coerceIn(1, 5))
     suspend fun setLongPressAction(value: LongPressAction) = update(Keys.longPressAction, value.name)
 
     suspend fun savePosition(orientation: Int, x: Int, y: Int) {
@@ -142,6 +145,10 @@ class SettingsRepository(
         attentionBubblesEnabled = preferences[Keys.attentionBubblesEnabled] ?: true,
         chatMessageBubblesEnabled = preferences[Keys.chatMessageBubblesEnabled] ?: true,
         completionBubblesEnabled = preferences[Keys.completionBubblesEnabled] ?: true,
+        speechStyle = preferences[Keys.speechStyle]
+            ?.let { runCatching { SpeechStyle.valueOf(it) }.getOrNull() }
+            ?: SpeechStyle.FRIENDLY,
+        maxVisibleBubbles = (preferences[Keys.maxVisibleBubbles] ?: 5).coerceIn(1, 5),
         longPressAction = preferences[Keys.longPressAction]
             ?.let { runCatching { LongPressAction.valueOf(it) }.getOrNull() }
             ?: LongPressAction.MENU,
