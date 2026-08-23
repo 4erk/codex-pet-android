@@ -1,5 +1,6 @@
 package com.fourerk.codexpet.app
 
+import android.app.Activity
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Typeface
@@ -12,13 +13,14 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Space
 import android.widget.TextView
+import androidx.activity.ComponentActivity
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlin.math.roundToInt
 
 /**
  * Native settings design system inspired by iOS grouped settings plus HyperOS/MagicOS soft surfaces.
- * Keep controls contextual: navigation is row-based, toggles are trailing controls, and primary
+ * Controls stay contextual: navigation is row-based, toggles are trailing controls, and primary
  * actions are visually distinct from ordinary settings rows.
  */
 internal object PetUi {
@@ -57,13 +59,41 @@ internal object PetUi {
 
     fun page(context: Context, title: String, subtitle: String): LinearLayout = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(context, 20), dp(context, 22), dp(context, 20), dp(context, 44))
+        setPadding(dp(context, 20), dp(context, 16), dp(context, 20), dp(context, 44))
         setBackgroundColor(BACKGROUND)
-        addView(text(context, title, 32f, TEXT, bold = true).apply {
-            letterSpacing = -0.018f
-        })
+
+        val nested = context is Activity && context !is HomeActivity
+        if (nested) {
+            val top = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, dp(context, 10))
+            }
+            val back = text(context, "‹", 35f, ACCENT).apply {
+                gravity = Gravity.CENTER
+                contentDescription = "Назад"
+                isClickable = true
+                isFocusable = true
+                foreground = selectableForeground(context)
+                setOnClickListener {
+                    when (context) {
+                        is ComponentActivity -> context.onBackPressedDispatcher.onBackPressed()
+                        is Activity -> context.finish()
+                    }
+                }
+            }
+            top.addView(back, LinearLayout.LayoutParams(dp(context, 40), dp(context, 44)))
+            top.addView(text(context, title, 30f, TEXT, bold = true).apply {
+                letterSpacing = -0.018f
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(top)
+        } else {
+            addView(text(context, title, 32f, TEXT, bold = true).apply {
+                letterSpacing = -0.018f
+            })
+        }
         addView(text(context, subtitle, 13.5f, MUTED).apply {
-            setPadding(0, dp(context, 7), 0, 0)
+            setPadding(if (nested) dp(context, 42) else 0, 0, 0, 0)
             maxLines = 3
         })
     }
@@ -127,12 +157,15 @@ internal object PetUi {
         setOnClickListener { onClick() }
     }
 
-    /** Grouped-settings row with a trailing system-style switch. */
+    /** Grouped-settings row with a trailing system-style switch; the entire row toggles it. */
     fun toggle(context: Context, title: String, subtitle: String? = null): LinearLayout =
         LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(context, 2), dp(context, 10), 0, dp(context, 10))
+            isClickable = true
+            isFocusable = true
+            foreground = selectableForeground(context)
 
             val labels = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -146,13 +179,14 @@ internal object PetUi {
             }
             addView(labels, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
-            addView(SwitchMaterial(context).apply {
+            val toggle = SwitchMaterial(context).apply {
                 tag = "switch"
                 text = ""
                 minWidth = 0
                 minimumWidth = 0
-                buttonTintList = null
-            })
+            }
+            addView(toggle)
+            setOnClickListener { toggle.toggle() }
         }
 
     fun switchFrom(row: View): SwitchMaterial = (row as LinearLayout).findViewWithTag("switch")
@@ -168,6 +202,7 @@ internal object PetUi {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(context, 2), dp(context, 10), 0, dp(context, 10))
+        minHeight = dp(context, 56)
         isClickable = true
         isFocusable = true
         foreground = selectableForeground(context)
