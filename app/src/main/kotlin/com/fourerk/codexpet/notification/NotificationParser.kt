@@ -55,9 +55,6 @@ class NotificationParser {
             if (groupSummary) "ChatGPT" else "Codex task",
         ).orEmpty().singleLine(120)
 
-        // Group summaries often contain several child lines. Showing all lines as one bubble is noisy,
-        // while inventing one task per line would create fake deep links. Keep only the freshest line;
-        // the full active notification set is reconciled separately and real children win over summary.
         val summary = if (groupSummary && inboxLines.isNotEmpty()) {
             inboxLines.last().multiLine(MAX_TASK_TEXT)
         } else {
@@ -75,7 +72,8 @@ class NotificationParser {
             if (groupSummary && inboxLines.size > 1) "${inboxLines.size} обновлений в группе" else null,
         )?.singleLine(160)
 
-        val notificationRole = ChatGptNotificationClassifier.classify(notification)
+        val classification = ChatGptNotificationClassifier.inspect(notification)
+        val notificationRole = classification.role
         val kind = when (notificationRole) {
             ChatGptNotificationRole.CODEX_TASK -> TaskKind.TASK
             ChatGptNotificationRole.CODEX_AVATAR -> TaskKind.BUBBLE_CONTROLLER
@@ -84,15 +82,14 @@ class NotificationParser {
         val fallbackText = listOfNotNull(title, summary, detail, inboxLines.lastOrNull())
             .joinToString(" ")
             .take(MAX_TASK_TEXT)
-        val status = TaskStatusResolver.resolve(
-            TaskSignals(
-                progress = progress,
-                progressMax = progressMax,
-                progressIndeterminate = progressIndeterminate,
-                ongoing = ongoing,
-                fallbackText = fallbackText,
-            ),
+        val taskSignals = TaskSignals(
+            progress = progress,
+            progressMax = progressMax,
+            progressIndeterminate = progressIndeterminate,
+            ongoing = ongoing,
+            fallbackText = fallbackText,
         )
+        val status = TaskStatusResolver.resolve(taskSignals)
         val animationDecision = if (kind == TaskKind.CHAT_MESSAGE) {
             TaskAnimationDecision(TaskAnimationCue.MESSAGE_RECEIVED, CueSignalSource.NOTIFICATION_ROLE)
         } else {
@@ -117,6 +114,8 @@ class NotificationParser {
                 ?: "notification:${sbn.key}"
         }
         val notes = buildList {
+            add("Notification role: ${notificationRole.name} (${classification.confidence}%)")
+            classification.reasons.forEach { add("Role signal: $it") }
             if (kind == TaskKind.BUBBLE_CONTROLLER) {
                 add("Avatar notification is retained for pet/deep-link data but hidden from speech")
             }
