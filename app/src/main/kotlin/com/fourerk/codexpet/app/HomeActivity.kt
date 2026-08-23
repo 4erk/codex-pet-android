@@ -52,10 +52,10 @@ class HomeActivity : AppCompatActivity() {
         val body = PetUi.page(
             this,
             "Codex Pet",
-            "Пет, реплики и состояние Codex — поверх ChatGPT, без лишней панели.",
+            "Питомец, реплики и состояние Codex поверх ChatGPT.",
         )
 
-        val hero = PetUi.card(this).apply {
+        val hero = PetUi.heroCard(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
@@ -64,78 +64,87 @@ class HomeActivity : AppCompatActivity() {
             background = null
             contentDescription = "Текущий питомец"
         }
-        hero.addView(preview, LinearLayout.LayoutParams(PetUi.dp(this, 104), PetUi.dp(this, 104)))
+        hero.addView(preview, LinearLayout.LayoutParams(PetUi.dp(this, 102), PetUi.dp(this, 102)))
+
         val heroInfo = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(PetUi.dp(this@HomeActivity, 12), 0, 0, 0)
+            setPadding(PetUi.dp(this@HomeActivity, 14), 0, 0, 0)
         }
-        heroInfo.addView(PetUi.text(this, "Violet Vixen", 20f, PetUi.TEXT, bold = true))
-        heroStatus = PetUi.text(this, "Проверяю…", 13f, PetUi.MUTED, bold = true)
-        heroInfo.addView(heroStatus)
+        heroInfo.addView(PetUi.text(this, "Violet Vixen", 19f, PetUi.TEXT, bold = true))
+        heroStatus = PetUi.statusPill(this, "Проверяю", PetUi.MUTED)
+        heroInfo.addView(heroStatus, PetUi.marginParams(this, 8))
         startButton = PetUi.primaryAction(this, "Запустить", ::toggleOverlay)
-        heroInfo.addView(startButton, PetUi.marginParams(this, 8))
+        heroInfo.addView(startButton, PetUi.marginParams(this, 10))
         hero.addView(heroInfo, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         body.addView(hero, PetUi.marginParams(this, 16))
 
-        setupCard = PetUi.card(this, "Нужно закончить настройку").apply {
-            addView(PetUi.text(this@HomeActivity, "Codex Pet сам проверяет обязательные системные доступы.", 12f, PetUi.MUTED))
-            addView(PetUi.action(this@HomeActivity, "Доступ к уведомлениям") {
-                SystemAccess.openNotificationListenerSettings(this@HomeActivity)
+        setupCard = PetUi.card(this)
+        setupCard.addView(PetUi.text(this, "Нужны доступы", 16f, PetUi.TEXT, bold = true))
+        setupCard.addView(PetUi.helper(this, "Codex Pet сам проверяет обязательные системные разрешения."))
+        setupCard.addView(PetUi.navigationRow(this, "◉", "Уведомления", "Чтение состояния ChatGPT") {
+            SystemAccess.openNotificationListenerSettings(this)
+        })
+        PetUi.addDivider(setupCard, this)
+        setupCard.addView(PetUi.navigationRow(this, "◫", "Поверх окон", "Прозрачный pet overlay") {
+            SystemAccess.openOverlaySettings(this)
+        })
+        if (Build.VERSION.SDK_INT >= 33) {
+            PetUi.addDivider(setupCard, this)
+            setupCard.addView(PetUi.navigationRow(this, "●", "Служебные", "Уведомление фоновой работы") {
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             })
-            addView(PetUi.action(this@HomeActivity, "Отображение поверх приложений") {
-                SystemAccess.openOverlaySettings(this@HomeActivity)
-            })
-            if (Build.VERSION.SDK_INT >= 33) {
-                addView(PetUi.action(this@HomeActivity, "Уведомления Codex Pet") {
-                    notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                })
-            }
         }
-        body.addView(setupCard, PetUi.marginParams(this))
+        body.addView(setupCard, PetUi.marginParams(this, 12))
 
-        val liveCard = PetUi.card(this, "Сейчас")
-        liveStatus = PetUi.text(this, "Собираю состояние…", 13f, PetUi.MUTED)
+        body.addView(PetUi.sectionTitle(this, "Сейчас"))
+        val liveCard = PetUi.card(this)
+        liveStatus = PetUi.text(this, "Собираю состояние…", 12.5f, PetUi.MUTED)
         liveCard.addView(liveStatus)
-        liveCard.addView(PetUi.navigationRow(this, "↗", "Подключение", "Listener, ChatGPT notifications и восстановление") {
+        PetUi.addDivider(liveCard, this)
+        liveCard.addView(PetUi.navigationRow(this, "↗", "Подключение", "Listener, heartbeat и восстановление") {
             startActivity(Intent(this, IntegrationActivity::class.java))
         })
-        body.addView(liveCard, PetUi.marginParams(this))
+        body.addView(liveCard, PetUi.marginParams(this, 4))
 
-        body.addView(PetUi.sectionTitle(this, "Внешний вид и реакции"))
+        body.addView(PetUi.sectionTitle(this, "Питомец"))
         body.addView(PetUi.card(this).apply {
-            addView(PetUi.navigationRow(this@HomeActivity, "🐾", "Питомец", "Размер, позиция и pet pack") {
+            addView(PetUi.navigationRow(this@HomeActivity, "◉", "Питомец", "Размер, pack и позиция") {
                 startActivity(Intent(this@HomeActivity, PetSettingsActivity::class.java))
             })
-            addView(PetUi.divider(this@HomeActivity), LinearLayout.LayoutParams.MATCH_PARENT, PetUi.dp(this@HomeActivity, 1))
-            addView(PetUi.navigationRow(this@HomeActivity, "💬", "Реплики", "Текст, масштаб, приоритеты и lifetimes") {
+            PetUi.addDivider(this, this@HomeActivity)
+            addView(PetUi.navigationRow(this@HomeActivity, "◰", "Реплики", "Масштаб, preview и правила") {
                 startActivity(Intent(this@HomeActivity, SpeechSettingsActivity::class.java))
             })
-            addView(PetUi.divider(this@HomeActivity), LinearLayout.LayoutParams.MATCH_PARENT, PetUi.dp(this@HomeActivity, 1))
-            addView(PetUi.navigationRow(this@HomeActivity, "✦", "Анимации", "Сценарии, эвристики и тест каждого состояния") {
+            PetUi.addDivider(this, this@HomeActivity)
+            addView(PetUi.navigationRow(this@HomeActivity, "✦", "Анимации", "Состояния и сценарии") {
                 startActivity(Intent(this@HomeActivity, AnimationSettingsActivity::class.java))
             })
-            addView(PetUi.divider(this@HomeActivity), LinearLayout.LayoutParams.MATCH_PARENT, PetUi.dp(this@HomeActivity, 1))
-            addView(PetUi.navigationRow(this@HomeActivity, "◫", "Стенд 1–5 баблов", "Интерактивная проверка компоновки") {
+            PetUi.addDivider(this, this@HomeActivity)
+            addView(PetUi.navigationRow(this@HomeActivity, "▱", "Стенд", "1–5 баблов и края экрана") {
                 startActivity(Intent(this@HomeActivity, BubbleLabActivity::class.java))
             })
-        }, PetUi.marginParams(this, 6))
+        }, PetUi.marginParams(this, 4))
 
-        body.addView(PetUi.sectionTitle(this, "Приложение"))
+        body.addView(PetUi.sectionTitle(this, "Система"))
         body.addView(PetUi.card(this).apply {
-            addView(PetUi.navigationRow(this@HomeActivity, "⚙", "Поведение", "Жесты, автозапуск и фон") {
+            addView(PetUi.navigationRow(this@HomeActivity, "⌁", "Поведение", "Жесты, автозапуск и фон") {
                 startActivity(Intent(this@HomeActivity, BehaviorActivity::class.java))
             })
-            addView(PetUi.divider(this@HomeActivity), LinearLayout.LayoutParams.MATCH_PARENT, PetUi.dp(this@HomeActivity, 1))
-            addView(PetUi.navigationRow(this@HomeActivity, "⇩", "Обновления", "GitHub Releases, SHA-256 и установка") {
+            PetUi.addDivider(this, this@HomeActivity)
+            addView(PetUi.navigationRow(this@HomeActivity, "⇩", "Обновления", "GitHub, APK и stable-канал") {
                 startActivity(Intent(this@HomeActivity, UpdatesActivity::class.java))
             })
-            addView(PetUi.divider(this@HomeActivity), LinearLayout.LayoutParams.MATCH_PARENT, PetUi.dp(this@HomeActivity, 1))
-            addView(PetUi.navigationRow(this@HomeActivity, "?", "Помощь", "Диагностика и сценарии восстановления") {
+            PetUi.addDivider(this, this@HomeActivity)
+            addView(PetUi.navigationRow(this@HomeActivity, "?", "Помощь", "Восстановление и диагностика") {
                 startActivity(Intent(this@HomeActivity, HelpActivity::class.java))
             })
-        }, PetUi.marginParams(this, 6))
+        }, PetUi.marginParams(this, 4))
 
-        return ScrollView(this).apply { addView(body) }
+        return ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(body)
+        }
     }
 
     private fun observeState() {
@@ -163,19 +172,30 @@ class HomeActivity : AppCompatActivity() {
         val ready = notificationAccess && overlayAccess && ownNotifications
 
         preview.setImageBitmap(pet?.bitmap)
-        heroStatus.text = when {
-            settings.overlayEnabled && settings.petVisible -> "● На экране"
-            settings.overlayEnabled -> "○ Запущен, но скрыт"
-            ready -> "Готов к запуску"
-            else -> "Нужны разрешения"
+        val statusText: String
+        val statusColor: Int
+        when {
+            settings.overlayEnabled && settings.petVisible -> {
+                statusText = "На экране"
+                statusColor = PetUi.GOOD
+            }
+            settings.overlayEnabled -> {
+                statusText = "Скрыт"
+                statusColor = PetUi.MUTED
+            }
+            ready -> {
+                statusText = "Готов"
+                statusColor = PetUi.ACCENT
+            }
+            else -> {
+                statusText = "Нужны доступы"
+                statusColor = PetUi.WARN
+            }
         }
-        heroStatus.setTextColor(
-            when {
-                settings.overlayEnabled && settings.petVisible -> PetUi.GOOD
-                ready -> PetUi.MUTED
-                else -> PetUi.WARN
-            },
-        )
+        heroStatus.text = statusText
+        heroStatus.setTextColor(statusColor)
+        heroStatus.background = PetUi.rounded(this, statusColor.withAlpha(28), 13, statusColor.withAlpha(72))
+
         startButton.text = when {
             settings.overlayEnabled && settings.petVisible -> "Остановить"
             settings.overlayEnabled -> "Показать"
@@ -190,20 +210,21 @@ class HomeActivity : AppCompatActivity() {
                 it.animationCue == TaskAnimationCue.DISCONNECTED
         }
         liveStatus.text = buildString {
-            append(if (listener.connected) "✓ Listener работает" else "○ Listener восстанавливается")
+            append(if (listener.connected) "Listener работает" else "Listener восстанавливается")
             listener.lastHeartbeatAt?.let {
                 val age = ((System.currentTimeMillis() - it) / 1_000L).coerceAtLeast(0L)
-                append(" · heartbeat ${age}с")
+                append(" · ${age}с")
             }
-            if (listener.consecutiveScanFailures > 0) append("\nСбоев сканирования подряд: ${listener.consecutiveScanFailures}")
-            if (listener.rebindAttempts > 0) append(" · rebind #${listener.rebindAttempts}")
-            append("\nChatGPT notifications: ${listener.activeNotificationCount} · Codex-задач: ${codexTasks.size}")
-            if (attention > 0) append(" · требуют внимания: $attention")
+            append("\n${listener.activeNotificationCount} уведомл. · ${codexTasks.size} задач")
+            if (attention > 0) append(" · внимания: $attention")
             if (update.phase in setOf(UpdatePhase.AVAILABLE, UpdatePhase.READY_TO_INSTALL)) {
-                append("\n↑ Доступно обновление ${update.latestVersion ?: ""}")
+                append("\nОбновление ${update.latestVersion ?: ""} доступно")
             }
         }
     }
+
+    private fun Int.withAlpha(alpha: Int): Int =
+        (this and 0x00FFFFFF) or ((alpha.coerceIn(0, 255)) shl 24)
 
     private fun ensureOverlayServiceIfExpected() {
         val settings = AppGraph.settings.settings.value
