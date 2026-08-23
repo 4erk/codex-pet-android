@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <queries>
         <package android:name="com.openai.chatgpt" />
@@ -32,6 +35,8 @@
         <activity android:name=".app.AnimationSettingsActivity" android:exported="false" />
         <activity android:name=".app.IntegrationActivity" android:exported="false" />
         <activity android:name=".app.BehaviorActivity" android:exported="false" />
+        <activity android:name=".app.UpdatesActivity" android:exported="false" />
+        <activity android:name=".app.BubbleLabActivity" android:exported="false" />
         <activity android:name=".app.HelpActivity" android:exported="false" />
 
         <activity
@@ -65,6 +70,10 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="User-enabled persistent transparent pet overlay showing local notification-derived task state" />
         </service>
+
+        <receiver
+            android:name=".update.UpdateInstallReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".system.BootReceiver"
