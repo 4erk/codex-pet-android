@@ -8,6 +8,11 @@ enum class LongPressAction {
     HIDE,
 }
 
+enum class SpeechStyle {
+    FRIENDLY,
+    EXACT,
+}
+
 data class AppSettings(
     val sourcePackage: String = DEFAULT_CHATGPT_PACKAGE,
     val overlayEnabled: Boolean = false,
@@ -26,6 +31,8 @@ data class AppSettings(
     val attentionBubblesEnabled: Boolean = true,
     val chatMessageBubblesEnabled: Boolean = true,
     val completionBubblesEnabled: Boolean = true,
+    val speechStyle: SpeechStyle = SpeechStyle.FRIENDLY,
+    val maxVisibleBubbles: Int = 5,
     val longPressAction: LongPressAction = LongPressAction.MENU,
     val lastPetHash: String? = null,
     val lastPetUpdatedAt: Long? = null,
