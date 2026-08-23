@@ -214,12 +214,8 @@ class UpdatesActivity : AppCompatActivity() {
         )
         primaryButton.isEnabled = !busy
         manualApkButton.isEnabled = !busy
-        stableButton.visibility = if (BuildConfig.DEBUG && state.phase == UpdatePhase.UP_TO_DATE && AppGraph.updates.openStableApp().also {
-                if (it) {
-                    // We only probe availability here; reopening immediately would be wrong.
-                    // Visibility is reset below and the actual click opens the app.
-                }
-            }) {
+        // In debug, UP_TO_DATE after a GitHub check means a stable installation is already present.
+        stableButton.visibility = if (BuildConfig.DEBUG && state.phase == UpdatePhase.UP_TO_DATE) {
             android.view.View.VISIBLE
         } else {
             android.view.View.GONE
