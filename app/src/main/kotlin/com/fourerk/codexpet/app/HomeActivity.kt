@@ -42,6 +42,7 @@ class HomeActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        ensureOverlayServiceIfExpected()
         render()
     }
 
@@ -199,11 +200,26 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
+    private fun ensureOverlayServiceIfExpected() {
+        val settings = AppGraph.settings.settings.value
+        if (!settings.overlayEnabled || !settings.petVisible) return
+        if (!SystemAccess.hasNotificationAccess(this)) return
+        if (!SystemAccess.canDrawOverlays(this)) return
+        if (Build.VERSION.SDK_INT >= 33 && !SystemAccess.hasOwnNotificationPermission(this)) return
+        SystemAccess.startOverlay(this).onFailure {
+            AppGraph.diagnostics.error("restore overlay from HomeActivity: ${it.javaClass.simpleName}")
+        }
+    }
+
     private fun toggleOverlay() {
         lifecycleScope.launch {
             val settings = AppGraph.settings.settings.value
             if (settings.overlayEnabled && !settings.petVisible) {
                 AppGraph.settings.setPetVisible(true)
+                SystemAccess.startOverlay(this@HomeActivity).onFailure {
+                    AppGraph.settings.setPetVisible(false)
+                    AppGraph.diagnostics.error("show overlay: ${it.javaClass.simpleName}")
+                }
                 return@launch
             }
             if (settings.overlayEnabled) {
@@ -227,6 +243,7 @@ class HomeActivity : AppCompatActivity() {
             AppGraph.settings.setOverlayEnabled(true)
             SystemAccess.startOverlay(this@HomeActivity).onFailure {
                 AppGraph.settings.setOverlayEnabled(false)
+                AppGraph.diagnostics.error("start overlay: ${it.javaClass.simpleName}")
             }
         }
     }

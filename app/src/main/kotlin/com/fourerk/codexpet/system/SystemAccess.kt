@@ -71,9 +71,7 @@ object SystemAccess {
     }
 
     fun stopOverlay(context: Context) {
-        context.startService(
-            Intent(context, OverlayService::class.java).setAction(OverlayService.ACTION_HIDE),
-        )
+        context.stopService(Intent(context, OverlayService::class.java))
     }
 
     fun isHonorDevice(): Boolean =

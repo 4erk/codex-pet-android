@@ -84,6 +84,7 @@ class OverlayControllerV2(
     private var autoSpeechSuppressed = false
     private var pageStart = 0
     private var renderedPageSize = 0
+    private var speechRenderPending = false
 
     private var menuView: View? = null
     private var menuParams: WindowManager.LayoutParams? = null
@@ -94,10 +95,13 @@ class OverlayControllerV2(
 
     private var downRawX = 0f
     private var downRawY = 0f
+    private var lastRawX = 0f
     private var downWindowX = 0
     private var downWindowY = 0
     private var moved = false
+    private var dragging = false
     private var longPressTriggered = false
+    private var snapAnimator: ValueAnimator? = null
 
     private val speechRotationRunnable = Runnable {
         if (!speechShown || speechItems.size <= currentPageLimit()) return@Runnable
@@ -153,6 +157,8 @@ class OverlayControllerV2(
     }
 
     fun destroy() {
+        cancelSnapAnimation()
+        dragging = false
         handler.removeCallbacksAndMessages(null)
         cancelTransient()
         stopNativeAnimation()
@@ -278,6 +284,8 @@ class OverlayControllerV2(
     }
 
     fun onConfigurationChanged() {
+        cancelSnapAnimation()
+        dragging = false
         removeMenu()
         val params = petParams ?: return
         val size = dp(settings.petSizeDp)
@@ -338,11 +346,14 @@ class OverlayControllerV2(
         val params = petParams ?: return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                cancelSnapAnimation()
                 downRawX = event.rawX
                 downRawY = event.rawY
+                lastRawX = event.rawX
                 downWindowX = params.x
                 downWindowY = params.y
                 moved = false
+                dragging = false
                 longPressTriggered = false
                 handler.postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout().toLong())
                 return true
@@ -350,8 +361,10 @@ class OverlayControllerV2(
             MotionEvent.ACTION_MOVE -> {
                 val dx = event.rawX - downRawX
                 val dy = event.rawY - downRawY
+                val motionDx = event.rawX - lastRawX
                 if (!moved && hypot(dx.toDouble(), dy.toDouble()) > touchSlop.toDouble()) {
                     moved = true
+                    dragging = true
                     handler.removeCallbacks(longPressRunnable)
                     removeMenu()
                 }
@@ -360,15 +373,27 @@ class OverlayControllerV2(
                     params.y = downWindowY + dy.roundToInt()
                     clampPosition(params, dp(settings.petSizeDp))
                     updatePetLayout()
-                    if (speechShown) renderSpeechWindows()
-                    renderState(if (dx >= 0f) PetAnimationState.RUNNING_RIGHT else PetAnimationState.RUNNING_LEFT)
+                    if (speechShown) repositionSpeechWindows()
+                    if (abs(motionDx) >= 0.5f) {
+                        renderState(
+                            if (motionDx >= 0f) PetAnimationState.RUNNING_RIGHT
+                            else PetAnimationState.RUNNING_LEFT,
+                        )
+                    }
                 }
+                lastRawX = event.rawX
                 return true
             }
             MotionEvent.ACTION_UP -> {
                 handler.removeCallbacks(longPressRunnable)
+                dragging = false
                 if (moved) {
-                    if (settings.snapEnabled) snapToNearestEdge() else savePosition()
+                    if (settings.snapEnabled) {
+                        snapToNearestEdge()
+                    } else {
+                        savePosition()
+                        finishSpeechMotion()
+                    }
                     renderTaskAnimation(force = true)
                 } else if (!longPressTriggered) {
                     view.performClick()
@@ -378,7 +403,9 @@ class OverlayControllerV2(
             }
             MotionEvent.ACTION_CANCEL -> {
                 handler.removeCallbacks(longPressRunnable)
+                dragging = false
                 if (moved) savePosition()
+                finishSpeechMotion()
                 renderTaskAnimation(force = true)
                 return true
             }
@@ -468,6 +495,7 @@ class OverlayControllerV2(
         speechManualMode = false
         speechShown = false
         pageStart = 0
+        speechRenderPending = false
         handler.removeCallbacks(speechRotationRunnable)
         removeSpeechWindows()
         renderTaskAnimation(force = true)
@@ -475,6 +503,11 @@ class OverlayControllerV2(
 
     private fun renderSpeechWindows() {
         handler.removeCallbacks(speechRotationRunnable)
+        if (motionInProgress()) {
+            speechRenderPending = true
+            return
+        }
+        speechRenderPending = false
         removeSpeechWindows(keepShownState = true)
         if (!speechShown || speechItems.isEmpty() || petParams == null) return
 
@@ -488,7 +521,6 @@ class OverlayControllerV2(
         val bubbleScale = settings.bubbleScale.coerceIn(0.75f, 1.5f)
         val margin = dp(((settings.petSizeDp / 28f) * bubbleScale).roundToInt().coerceIn(2, 9))
         val gap = dp((6f * bubbleScale).roundToInt().coerceIn(4, 9))
-        val petCenterX = petLayout.x + petSize / 2
 
         val prepared = page.mapIndexed { index, item ->
             buildSpeechView(item, pageStart + index, speechItems.size, metrics.width, metrics)
@@ -501,55 +533,69 @@ class OverlayControllerV2(
         }
         val minimumHeight = dp((48f * bubbleScale).roundToInt().coerceIn(40, 72))
         val heights = prepared.map { it.root.measuredHeight.coerceAtLeast(minimumHeight) }
-        val totalHeight = heights.sum() + gap * (prepared.size - 1).coerceAtLeast(0)
-        val rightX = petLayout.x + petSize + margin
-        val leftX = petLayout.x - metrics.width - margin
-        val fitsRight = rightX + metrics.width <= safe.right
-        val fitsLeft = leftX >= safe.left
+        val placements = SpeechBubblePlacement.calculate(
+            safe = safe.toOverlayBounds(),
+            petX = petLayout.x,
+            petY = petLayout.y,
+            petSize = petSize,
+            bubbleWidth = metrics.width,
+            bubbleHeights = heights,
+            margin = margin,
+            gap = gap,
+        )
 
-        if (fitsRight || fitsLeft) {
-            val useRight = fitsRight && (!fitsLeft || petCenterX < (safe.left + safe.right) / 2)
-            val x = if (useRight) rightX else leftX
-            // A single horizontal bubble deliberately starts at the pet's top edge. Multiple
-            // bubbles form a compact stack around the pet instead of consuming the whole screen.
-            var y = if (prepared.size == 1) {
-                petLayout.y.coerceIn(safe.top, (safe.bottom - heights.first()).coerceAtLeast(safe.top))
-            } else {
-                (petLayout.y + petSize / 2 - totalHeight / 2)
-                    .coerceIn(safe.top, (safe.bottom - totalHeight).coerceAtLeast(safe.top))
-            }
-            prepared.forEachIndexed { index, bubble ->
-                val height = heights[index]
-                val targetY = if (prepared.size == 1) {
-                    petLayout.y + petSize / 2
-                } else {
-                    petLayout.y + ((index + 1f) / (prepared.size + 1f) * petSize).roundToInt()
-                }
-                val edge = if (useRight) TailEdge.LEFT else TailEdge.RIGHT
-                configureTail(bubble, edge, (targetY - y).toFloat())
-                addSpeechWindow(bubble, x, y)
-                y += height + gap
-            }
-        } else {
-            val belowY = petLayout.y + petSize + margin
-            val aboveY = petLayout.y - totalHeight - margin
-            val spaceBelow = safe.bottom - belowY
-            val spaceAbove = petLayout.y - margin - safe.top
-            val useBelow = spaceBelow >= totalHeight || spaceBelow >= spaceAbove
-            val x = (petCenterX - metrics.width / 2)
-                .coerceIn(safe.left, (safe.right - metrics.width).coerceAtLeast(safe.left))
-            var y = (if (useBelow) belowY else aboveY)
-                .coerceIn(safe.top, (safe.bottom - totalHeight).coerceAtLeast(safe.top))
-            prepared.forEachIndexed { index, bubble ->
-                val edge = if (useBelow) TailEdge.TOP else TailEdge.BOTTOM
-                configureTail(bubble, edge, (petCenterX - x).toFloat())
-                addSpeechWindow(bubble, x, y)
-                y += heights[index] + gap
-            }
+        prepared.zip(placements).forEach { (bubble, placement) ->
+            configureTail(bubble, placement.anchor.toTailEdge(), placement.tailOffset)
+            addSpeechWindow(bubble, placement.x, placement.y)
         }
 
         if (speechItems.size > currentPageLimit()) {
             handler.postDelayed(speechRotationRunnable, SPEECH_PAGE_ROTATION_MS)
+        }
+    }
+
+    private fun repositionSpeechWindows() {
+        if (!speechShown || speechWindows.isEmpty()) return
+        val petLayout = petParams ?: return
+        val safe = safeBounds()
+        val petSize = dp(settings.petSizeDp)
+        val bubbleScale = settings.bubbleScale.coerceIn(0.75f, 1.5f)
+        val margin = dp(((settings.petSizeDp / 28f) * bubbleScale).roundToInt().coerceIn(2, 9))
+        val gap = dp((6f * bubbleScale).roundToInt().coerceIn(4, 9))
+        val minimumHeight = dp((48f * bubbleScale).roundToInt().coerceIn(40, 72))
+        val bubbleWidth = speechWindows.first().params.width
+        val heights = speechWindows.map { window ->
+            window.bubble.root.measuredHeight.coerceAtLeast(minimumHeight)
+        }
+        val placements = SpeechBubblePlacement.calculate(
+            safe = safe.toOverlayBounds(),
+            petX = petLayout.x,
+            petY = petLayout.y,
+            petSize = petSize,
+            bubbleWidth = bubbleWidth,
+            bubbleHeights = heights,
+            margin = margin,
+            gap = gap,
+        )
+
+        speechWindows.zip(placements).forEach { (window, placement) ->
+            configureTail(window.bubble, placement.anchor.toTailEdge(), placement.tailOffset)
+            window.params.x = placement.x
+            window.params.y = placement.y
+            runCatching { windowManager.updateViewLayout(window.bubble.root, window.params) }
+                .onFailure { AppGraph.diagnostics.error("move speech bubble: ${it.javaClass.simpleName}") }
+        }
+    }
+
+    private fun finishSpeechMotion() {
+        if (!speechShown) {
+            speechRenderPending = false
+            return
+        }
+        if (speechRenderPending) {
+            renderSpeechWindows()
+        } else {
+            repositionSpeechWindows()
         }
     }
 
@@ -674,13 +720,27 @@ class OverlayControllerV2(
     private fun configureTail(bubble: PreparedSpeechBubble, edge: TailEdge, offset: Float) {
         bubble.drawable.pointTo(edge, offset)
         val tail = bubble.tailSize
-        bubble.root.setPadding(
-            if (edge == TailEdge.LEFT) tail else 0,
-            if (edge == TailEdge.TOP) tail else 0,
-            if (edge == TailEdge.RIGHT) tail else 0,
-            if (edge == TailEdge.BOTTOM) tail else 0,
-        )
+        val left = if (edge == TailEdge.LEFT) tail else 0
+        val top = if (edge == TailEdge.TOP) tail else 0
+        val right = if (edge == TailEdge.RIGHT) tail else 0
+        val bottom = if (edge == TailEdge.BOTTOM) tail else 0
+        if (bubble.root.paddingLeft != left ||
+            bubble.root.paddingTop != top ||
+            bubble.root.paddingRight != right ||
+            bubble.root.paddingBottom != bottom
+        ) {
+            bubble.root.setPadding(left, top, right, bottom)
+        }
     }
+
+    private fun BubbleAnchor.toTailEdge(): TailEdge = when (this) {
+        BubbleAnchor.LEFT -> TailEdge.LEFT
+        BubbleAnchor.RIGHT -> TailEdge.RIGHT
+        BubbleAnchor.TOP -> TailEdge.TOP
+        BubbleAnchor.BOTTOM -> TailEdge.BOTTOM
+    }
+
+    private fun SafeBounds.toOverlayBounds(): OverlayBounds = OverlayBounds(left, top, right, bottom)
 
     private fun addSpeechWindow(bubble: PreparedSpeechBubble, x: Int, y: Int) {
         val params = baseParams(bubble.width, WindowManager.LayoutParams.WRAP_CONTENT).apply {
@@ -689,16 +749,19 @@ class OverlayControllerV2(
         }
         runCatching { windowManager.addView(bubble.root, params) }
             .onFailure { AppGraph.diagnostics.error("add speech bubble: ${it.javaClass.simpleName}") }
-            .onSuccess { speechWindows += SpeechWindow(bubble.root, params) }
+            .onSuccess { speechWindows += SpeechWindow(bubble, params) }
     }
 
     private fun removeSpeechWindows(keepShownState: Boolean = false) {
         speechWindows.forEach { window ->
-            runCatching { windowManager.removeViewImmediate(window.view) }
+            runCatching { windowManager.removeViewImmediate(window.bubble.root) }
         }
         speechWindows.clear()
         renderedPageSize = 0
-        if (!keepShownState) speechShown = false
+        if (!keepShownState) {
+            speechShown = false
+            speechRenderPending = false
+        }
     }
 
     private fun showMenu() {
@@ -860,7 +923,7 @@ class OverlayControllerV2(
         val petCenterX = petLayout.x + dp(settings.petSizeDp) / 2f
         val petCenterY = petLayout.y + dp(settings.petSizeDp) / 2f
         val speechCenterX = speech.params.x + speech.params.width / 2f
-        val speechCenterY = speech.params.y + speech.view.measuredHeight / 2f
+        val speechCenterY = speech.params.y + speech.bubble.root.measuredHeight / 2f
         val degrees = Math.toDegrees(
             atan2((speechCenterX - petCenterX).toDouble(), (petCenterY - speechCenterY).toDouble()),
         ).let { if (it < 0) it + 360.0 else it }
@@ -906,6 +969,16 @@ class OverlayControllerV2(
         (petImage?.drawable as? Animatable)?.stop()
     }
 
+    private fun motionInProgress(): Boolean = dragging || snapAnimator?.isRunning == true
+
+    private fun cancelSnapAnimation() {
+        snapAnimator?.let { animator ->
+            animator.removeAllListeners()
+            animator.cancel()
+        }
+        snapAnimator = null
+    }
+
     private fun snapToNearestEdge() {
         val params = petParams ?: return
         val root = petRoot ?: return
@@ -914,18 +987,37 @@ class OverlayControllerV2(
         val left = safe.left
         val right = (safe.right - size).coerceAtLeast(left)
         val target = if (abs(params.x - left) <= abs(params.x - right)) left else right
-        ValueAnimator.ofInt(params.x, target).apply {
-            duration = 180L
-            addUpdateListener {
-                params.x = it.animatedValue as Int
-                runCatching { windowManager.updateViewLayout(root, params) }
-                if (speechShown) renderSpeechWindows()
-            }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) = savePosition()
-            })
-            start()
+        if (params.x == target) {
+            savePosition()
+            finishSpeechMotion()
+            return
         }
+
+        val animator = ValueAnimator.ofInt(params.x, target).apply {
+            duration = 180L
+        }
+        snapAnimator = animator
+        var cancelled = false
+        animator.addUpdateListener {
+            params.x = it.animatedValue as Int
+            runCatching { windowManager.updateViewLayout(root, params) }
+            if (speechShown) repositionSpeechWindows()
+        }
+        animator.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationCancel(animation: Animator) {
+                cancelled = true
+                if (snapAnimator === animation) snapAnimator = null
+            }
+
+            override fun onAnimationEnd(animation: Animator) {
+                if (snapAnimator === animation) snapAnimator = null
+                if (!cancelled) {
+                    savePosition()
+                    finishSpeechMotion()
+                }
+            }
+        })
+        animator.start()
     }
 
     private fun savePosition() {
@@ -1075,7 +1167,10 @@ class OverlayControllerV2(
     private fun orientation(): Int = context.resources.configuration.orientation
     private fun dp(value: Int): Int = (value * context.resources.displayMetrics.density).roundToInt()
 
-    private data class SpeechWindow(val view: View, val params: WindowManager.LayoutParams)
+    private data class SpeechWindow(
+        val bubble: PreparedSpeechBubble,
+        val params: WindowManager.LayoutParams,
+    )
     private data class PreparedSpeechBubble(
         val root: FrameLayout,
         val drawable: SpeechBubbleDrawable,

@@ -42,23 +42,33 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Prepare release signing
+      - name: Assemble unsigned release candidate
+        if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Prepare production signing
         id: release_signing
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           CODEX_PET_KEYSTORE_BASE64: ${{ secrets.CODEX_PET_KEYSTORE_BASE64 }}
+          CODEX_PET_KEYSTORE_PASSWORD: ${{ secrets.CODEX_PET_KEYSTORE_PASSWORD }}
+          CODEX_PET_KEY_ALIAS: ${{ secrets.CODEX_PET_KEY_ALIAS }}
+          CODEX_PET_KEY_PASSWORD: ${{ secrets.CODEX_PET_KEY_PASSWORD }}
         run: |
-          if [ -z "$CODEX_PET_KEYSTORE_BASE64" ]; then
+          if [ -z "$CODEX_PET_KEYSTORE_BASE64" ] || \
+             [ -z "$CODEX_PET_KEYSTORE_PASSWORD" ] || \
+             [ -z "$CODEX_PET_KEY_ALIAS" ] || \
+             [ -z "$CODEX_PET_KEY_PASSWORD" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Release signing secrets are not configured; debug APK remains available."
+            echo "Production signing is incomplete; CI will publish an unsigned release APK."
             exit 0
           fi
           echo "$CODEX_PET_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/codex-pet-release.jks"
           echo "path=$RUNNER_TEMP/codex-pet-release.jks" >> "$GITHUB_OUTPUT"
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
-      - name: Assemble signed release
-        if: steps.release_signing.outputs.ready == 'true'
+      - name: Assemble production release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           CODEX_PET_KEYSTORE_PATH: ${{ steps.release_signing.outputs.path }}
           CODEX_PET_KEYSTORE_PASSWORD: ${{ secrets.CODEX_PET_KEYSTORE_PASSWORD }}
@@ -66,14 +76,22 @@ jobs:
           CODEX_PET_KEY_PASSWORD: ${{ secrets.CODEX_PET_KEY_PASSWORD }}
         run: ./gradlew --no-daemon assembleRelease
 
-      - name: Verify release signature
+      - name: Verify production signature
         if: steps.release_signing.outputs.ready == 'true'
         run: apksigner verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
 
-      - name: Upload signed release APK
+      - name: Upload signed production APK
         if: steps.release_signing.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: codex-pet-android-release-signed
+          name: codex-pet-android-0.4.0-release-signed
           path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Upload unsigned production APK
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.release_signing.outputs.ready != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-pet-android-0.4.0-release-unsigned
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
