@@ -70,6 +70,11 @@ object PetSpeechFormatter {
         return variants[Math.floorMod(task.id.hashCode(), variants.size)]
     }
 
+    /**
+     * Only truly content-free statuses are replaced. Anything that names the failing component,
+     * remote endpoint, command, test, error code, requested choice, etc. is useful payload and must
+     * stay visible after the friendly lead.
+     */
     private fun isGenericStatus(text: String, cue: TaskAnimationCue): Boolean {
         val normalized = text.lowercase().trim().removeSuffix(".").removeSuffix("!")
         return when (cue) {
@@ -77,7 +82,7 @@ object PetSpeechFormatter {
                 "waiting for input", "needs input", "нужен ответ", "нужно подтверждение", "ожидает ответа",
             )
             TaskAnimationCue.DISCONNECTED -> normalized in setOf(
-                "disconnected", "connection lost", "remote computer offline", "соединение потеряно", "нет связи",
+                "disconnected", "connection lost", "соединение потеряно", "нет связи",
             )
             TaskAnimationCue.RECONNECTING -> normalized in setOf(
                 "reconnecting", "trying to reconnect", "переподключение", "переподключается",
