@@ -33,6 +33,6 @@ class UpdateInstallReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        const val ACTION_INSTALL_STATUS = "com.fourerk.codexpet.action.UPDATE_INSTALL_STATUS"
+        const val ACTION_INSTALL_STATUS = "com.mr4erk.codexpet.action.UPDATE_INSTALL_STATUS"
     }
 }
