@@ -16,10 +16,13 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.fourerk.codexpet.settings.SpeechStyle
 import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 class SpeechSettingsActivity : AppCompatActivity() {
     private lateinit var styleSpinner: Spinner
     private lateinit var styleExample: TextView
+    private lateinit var bubbleScaleLabel: TextView
+    private lateinit var bubbleScaleSeek: SeekBar
     private lateinit var maxLabel: TextView
     private lateinit var maxSeek: SeekBar
     private lateinit var completionLabel: TextView
@@ -66,6 +69,16 @@ class SpeechSettingsActivity : AppCompatActivity() {
         body.addView(voiceCard, PetUi.marginParams(this, 16))
 
         val bubblesCard = PetUi.card(this, "Баблы")
+        bubbleScaleLabel = PetUi.text(this, "Масштаб баблов: 1.00×", 14f, PetUi.TEXT, bold = true)
+        bubbleScaleSeek = SeekBar(this).apply { max = 75 }
+        bubblesCard.addView(bubbleScaleLabel)
+        bubblesCard.addView(bubbleScaleSeek)
+        bubblesCard.addView(PetUi.text(
+            this,
+            "Отдельно от размера пета. Масштабируются ширина, текст, отступы, скругление и хвост реплики; размещение автоматически остаётся в безопасной области экрана.",
+            12f,
+            PetUi.MUTED,
+        ))
         maxLabel = PetUi.text(this, "Одновременно: до 5 реплик", 14f, PetUi.TEXT, bold = true)
         maxSeek = SeekBar(this).apply { max = 4 }
         bubblesCard.addView(maxLabel)
@@ -119,6 +132,15 @@ class SpeechSettingsActivity : AppCompatActivity() {
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
+        bubbleScaleSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                if (fromUser) bubbleScaleLabel.text = "Масштаб баблов: ${"%.2f".format(scaleFromProgress(progress))}×"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                lifecycleScope.launch { AppGraph.settings.setBubbleScale(scaleFromProgress(seekBar.progress)) }
+            }
+        })
         maxSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                 if (fromUser) maxLabel.text = "Одновременно: до ${progress + 1} реплик"
@@ -157,6 +179,8 @@ class SpeechSettingsActivity : AppCompatActivity() {
                 AppGraph.settings.settings.collect { settings ->
                     binding = true
                     styleSpinner.setSelection(if (settings.speechStyle == SpeechStyle.FRIENDLY) 0 else 1, false)
+                    bubbleScaleSeek.progress = progressFromScale(settings.bubbleScale)
+                    bubbleScaleLabel.text = "Масштаб баблов: ${"%.2f".format(settings.bubbleScale)}×"
                     maxSeek.progress = settings.maxVisibleBubbles - 1
                     maxLabel.text = "Одновременно: до ${settings.maxVisibleBubbles} реплик"
                     completionSeek.progress = settings.completedVisibleSeconds
@@ -175,4 +199,9 @@ class SpeechSettingsActivity : AppCompatActivity() {
             }
         }
     }
+
+    private fun scaleFromProgress(progress: Int): Float = 0.75f + progress.coerceIn(0, 75) / 100f
+
+    private fun progressFromScale(scale: Float): Int =
+        ((scale.coerceIn(0.75f, 1.5f) - 0.75f) * 100f).roundToInt()
 }
