@@ -204,7 +204,8 @@ class OverlayControllerV2(
             old.completionBubblesEnabled != newSettings.completionBubblesEnabled ||
             old.completedVisibleSeconds != newSettings.completedVisibleSeconds ||
             old.speechStyle != newSettings.speechStyle ||
-            old.maxVisibleBubbles != newSettings.maxVisibleBubbles
+            old.maxVisibleBubbles != newSettings.maxVisibleBubbles ||
+            old.bubbleScale != newSettings.bubbleScale
         if (speechSettingsChanged) {
             if (!newSettings.autoTaskBubblesEnabled) {
                 speechManualMode = false
@@ -484,8 +485,9 @@ class OverlayControllerV2(
         val safe = safeBounds()
         val petLayout = petParams ?: return
         val petSize = dp(settings.petSizeDp)
-        val margin = dp((settings.petSizeDp / 28).coerceIn(2, 6))
-        val gap = dp(6)
+        val bubbleScale = settings.bubbleScale.coerceIn(0.75f, 1.5f)
+        val margin = dp(((settings.petSizeDp / 28f) * bubbleScale).roundToInt().coerceIn(2, 9))
+        val gap = dp((6f * bubbleScale).roundToInt().coerceIn(4, 9))
         val petCenterX = petLayout.x + petSize / 2
 
         val prepared = page.mapIndexed { index, item ->
@@ -497,7 +499,8 @@ class OverlayControllerV2(
                 View.MeasureSpec.makeMeasureSpec(safe.bottom - safe.top, View.MeasureSpec.AT_MOST),
             )
         }
-        val heights = prepared.map { it.root.measuredHeight.coerceAtLeast(dp(48)) }
+        val minimumHeight = dp((48f * bubbleScale).roundToInt().coerceIn(40, 72))
+        val heights = prepared.map { it.root.measuredHeight.coerceAtLeast(minimumHeight) }
         val totalHeight = heights.sum() + gap * (prepared.size - 1).coerceAtLeast(0)
         val rightX = petLayout.x + petSize + margin
         val leftX = petLayout.x - metrics.width - margin
@@ -583,7 +586,7 @@ class OverlayControllerV2(
             strokeColor = SPEECH_STROKE_COLOR,
             cornerRadiusPx = metrics.radius,
             tailSizePx = metrics.tailSize.toFloat(),
-            strokeWidthPx = dp(1).toFloat(),
+            strokeWidthPx = metrics.strokeWidth.toFloat(),
         )
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -625,12 +628,14 @@ class OverlayControllerV2(
             val footer = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL or Gravity.END
-                setPadding(0, dp(3), 0, 0)
+                setPadding(0, metrics.footerTopPadding, 0, 0)
             }
             val dot = View(context).apply {
-                background = roundedBackground(priorityColor(item.priority), 6f)
+                background = roundedBackground(priorityColor(item.priority), metrics.dotRadiusDp)
             }
-            footer.addView(dot, LinearLayout.LayoutParams(dp(6), dp(6)).apply { marginEnd = dp(6) })
+            footer.addView(dot, LinearLayout.LayoutParams(metrics.dotSize, metrics.dotSize).apply {
+                marginEnd = metrics.dotMarginEnd
+            })
             val meta = buildString {
                 if (total > currentPageLimit()) append("${absoluteIndex + 1}/$total")
                 if (!item.task.hasExactOpenTarget()) {
@@ -991,22 +996,44 @@ class OverlayControllerV2(
 
     private fun speechMetrics(page: List<PetSpeechItem>): SpeechMetrics {
         val petDp = settings.petSizeDp
+        val scale = settings.bubbleScale.coerceIn(0.75f, 1.5f)
         val longest = page.maxOfOrNull { (it.title?.length ?: 0) + it.text.length } ?: 80
-        val widthDp = when {
+        val baseWidthDp = when {
             longest < 55 -> (petDp * 2.2f).roundToInt().coerceIn(158, 230)
             longest < 130 -> (petDp * 2.65f).roundToInt().coerceIn(180, 276)
             else -> (petDp * 2.9f).roundToInt().coerceIn(200, 310)
         }
+        val safe = safeBounds()
+        val maximumWidthPx = (safe.right - safe.left - dp(24)).coerceAtLeast(dp(140))
+        val widthPx = minOf(
+            dp((baseWidthDp * scale).roundToInt()),
+            maximumWidthPx,
+        )
+        val baseTailDp = (petDp / 8f).coerceIn(8f, 16f)
+        val baseRadiusDp = (petDp / 4f).coerceIn(14f, 26f)
+        val baseHorizontalPaddingDp = (petDp / 6f).coerceIn(10f, 20f)
+        val baseVerticalPaddingDp = (petDp / 10f).coerceIn(7f, 14f)
+        val dotDp = (6f * scale).roundToInt().coerceIn(4, 9)
         return SpeechMetrics(
-            width = dp(widthDp),
-            tailSize = dp((petDp / 8).coerceIn(8, 16)),
-            radius = dp((petDp / 4).coerceIn(14, 26)).toFloat(),
-            horizontalPadding = dp((petDp / 6).coerceIn(10, 20)),
-            verticalPadding = dp((petDp / 10).coerceIn(7, 14)),
-            titleSp = (petDp * 0.15f).coerceIn(12f, 16f),
-            bodySp = (petDp * 0.16f).coerceIn(12.5f, 17f),
-            metaSp = (petDp * 0.12f).coerceIn(10f, 12.5f),
-            maxLines = if (page.size >= 4) 3 else if (petDp < 64) 3 else 4,
+            width = widthPx,
+            tailSize = dp((baseTailDp * scale).roundToInt().coerceIn(6, 24)),
+            radius = dp((baseRadiusDp * scale).roundToInt().coerceIn(10, 39)).toFloat(),
+            horizontalPadding = dp((baseHorizontalPaddingDp * scale).roundToInt().coerceIn(8, 30)),
+            verticalPadding = dp((baseVerticalPaddingDp * scale).roundToInt().coerceIn(5, 21)),
+            titleSp = ((petDp * 0.15f).coerceIn(12f, 16f) * scale).coerceIn(9f, 24f),
+            bodySp = ((petDp * 0.16f).coerceIn(12.5f, 17f) * scale).coerceIn(9.5f, 25.5f),
+            metaSp = ((petDp * 0.12f).coerceIn(10f, 12.5f) * scale).coerceIn(8f, 18.5f),
+            maxLines = when {
+                page.size >= 4 && scale < 0.9f -> 4
+                page.size >= 4 -> 3
+                petDp < 64 -> 3
+                else -> 4
+            },
+            footerTopPadding = dp((3f * scale).roundToInt().coerceIn(2, 5)),
+            dotSize = dp(dotDp),
+            dotMarginEnd = dp((6f * scale).roundToInt().coerceIn(4, 9)),
+            dotRadiusDp = (3f * scale).coerceIn(2f, 4.5f),
+            strokeWidth = dp(if (scale >= 1.35f) 2 else 1),
         )
     }
 
@@ -1065,6 +1092,11 @@ class OverlayControllerV2(
         val bodySp: Float,
         val metaSp: Float,
         val maxLines: Int,
+        val footerTopPadding: Int,
+        val dotSize: Int,
+        val dotMarginEnd: Int,
+        val dotRadiusDp: Float,
+        val strokeWidth: Int,
     )
     private data class SafeBounds(val left: Int, val top: Int, val right: Int, val bottom: Int)
 
