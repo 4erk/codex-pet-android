@@ -22,7 +22,6 @@ data class AppSettings(
     val landscapeX: Int = -1,
     val landscapeY: Int = -1,
     val completedVisibleSeconds: Int = 5,
-    val panelPinned: Boolean = false,
     val autoTaskBubblesEnabled: Boolean = true,
     val attentionBubblesEnabled: Boolean = true,
     val chatMessageBubblesEnabled: Boolean = true,

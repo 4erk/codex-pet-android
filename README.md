@@ -4,7 +4,7 @@
 
 Проект не модифицирует ChatGPT, не использует root, Accessibility, Shizuku, hooking, приватные файлы ChatGPT или закрытые OpenAI API. Источник состояния — только публичный Android notification API.
 
-> Текущий статус: `0.1.0-phase0`. Код диагностического probe, auto-sync, overlay и панели задач реализован и собирается. Главная гипотеза о содержимом реального `BubbleMetadata.icon` ещё должна быть подтверждена на HONOR X9c с текущей версией ChatGPT. До этого auto-sync нельзя считать доказанным на устройстве.
+> Текущий статус: `0.3.0-beta1`. Phase 0 probe реализован; фактически доступные icon/extras могут меняться между версиями ChatGPT и Android, поэтому приложение сохраняет санитизированную диагностику и честно показывает выбранный источник.
 
 ## Что уже реализовано
 
@@ -16,17 +16,22 @@
   1. `BubbleMetadata.icon`;
   2. AndroidX `MessagingStyle` Person icon;
   3. `Notification.getLargeIcon()`;
-  4. ручной PNG/WebP import только как явно обозначенный fallback.
+  4. ручной PNG/WebP/WebP-atlas или безопасный ZIP import.
 - Проверка прозрачности до автоматического принятия изображения. Adaptive icon mask не применяется; при `AdaptiveIconDrawable` анализируется foreground.
 - Автоматическое обновление pet при изменении bitmap hash.
 - Локальный cache: PNG, hash, timestamp, asset source и source package. Текст бесед на диск не сохраняется.
 - Прозрачный `TYPE_APPLICATION_OVERLAY` с `PixelFormat.TRANSLUCENT`, без background, crop, badge, shadow и elevation.
 - Drag, безопасные границы экрана/cutout, snap к краю и отдельные позиции portrait/landscape.
-- Single tap: компактная собственная панель задач.
+- Встроенный v2 Violet Vixen pack: 9 анимационных состояний и 16 направлений взгляда.
+- Single tap: компактная comic-style реплика, геометрически привязанная к pet; без большой панели.
+- При нескольких событиях реплики вращаются в одном стабильном окне; тап открывает именно соответствующий ChatGPT PendingIntent.
+- Общий быстрый выключатель авто-реплик действительно отключает и Codex, и обычные ChatGPT chat notifications.
+- Срок жизни контекста различается: chat/completed — таймер, running — пока активен, needs-input/error/disconnected — до разрешения или удаления notification.
 - Long press: ChatGPT, настройки, diagnostics или скрытие.
 - Task parsing с приоритетом structured progress → ongoing flag → только затем текстовые эвристики.
 - Переход к задаче через `contentIntent` → bubble intent → launcher ChatGPT.
-- Состояния `IDLE`, `RUNNING`, `SUCCESS`, `ERROR` и ненавязчивые transform-анимации; native `Animatable` запускается без преобразования в системную маску.
+- Девять исходных sprite-анимаций без transform-анимаций; native `Animatable` также запускается без системной маски.
+- ZIP reader не извлекает пути на файловую систему, запрещает traversal и ограничивает entries/распакованный размер.
 - `specialUse` foreground service с пользовательским постоянным notification.
 - Onboarding, permission status, отключение стандартных ChatGPT bubbles и инструкции для HONOR/MagicOS.
 - Санитизированный JSON export. Полный notification text не входит в export ни в одном build type.
@@ -44,12 +49,10 @@
 
 Успешный минимальный результат Phase 0:
 
-- `bubble.exists = true`;
-- `bubble.iconExists = true`;
-- кандидат `BUBBLE_ICON` имеет ожидаемый `Icon.type` и Drawable;
-- углы/часть пикселей прозрачны;
-- `acceptedForOverlay = true`;
-- hash меняется после реальной смены pet, но не из-за системного белого круга.
+- metadata/extras и доступные публичные icon candidates зафиксированы без текста переписки;
+- выбранный кандидат имеет alpha и проходит transparency gate;
+- diagnostics показывает фактический source, Drawable/bitmap geometry и hash;
+- несколько анимационных notification-кадров одного персонажа не принимаются за смену pet; полный sprite pack берётся из встроенного либо импортированного ассета.
 
 Полный эксперимент описан в [docs/phase-0-test-plan.md](docs/phase-0-test-plan.md).
 

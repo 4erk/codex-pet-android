@@ -10,9 +10,11 @@ flowchart TD
     NP --> TR["TaskRepository / StateFlow"]
     NP --> DR["DiagnosticsRepository"]
     PA --> PR["PetRepository / preview cache"]
-    SP["Official v1/v2 pet pack import"] --> PR
+    SP["Built-in / imported v1-v2 pet pack or safe ZIP"] --> PR
     TR --> OC["OverlayController"]
     PR --> OC
+    TR --> SS["PetSpeechSelector"]
+    SS --> OC
 ```
 
 `ChatGptNotificationListener` обрабатывает только package из `SettingsRepository`. По умолчанию это `com.openai.chatgpt`. Source можно изменить без замены parser/repository/overlay.
@@ -63,13 +65,17 @@ InboxStyle lines не превращаются в отдельные задач�
 4. локальные текстовые эвристики;
 5. `UNKNOWN`.
 
-Notification channel `codex_remote_session` классифицируется как Codex task, `.avatar` — как скрытый pet/deep-link controller. Другие notifications настроенного ChatGPT package становятся `CHAT_MESSAGE`: они могут отображаться в bubble и открываться через собственный PendingIntent, но не считаются Codex-задачами.
+Notification channel `codex_remote_session` классифицируется как Codex task, `.avatar` — как скрытый pet/deep-link controller. Другие notifications настроенного ChatGPT package становятся `CHAT_MESSAGE`: они могут отображаться как короткая comic-style реплика и открываться через собственный PendingIntent, но не считаются Codex-задачами.
 
 Выбор анимации выполняется отдельно: последняя конкретная RU/EN-эвристика актуального текста имеет приоритет над coarse structured status. Полная матрица описана в `docs/animation-mapping.md`.
 
+`PetSpeechSelector` использует порядок `needs input → blocked → ready → running`. В overlay одновременно существует одно небольшое speech-window; несколько значимых notifications циклически меняют его содержимое без пересоздания окна. `contentIntent` остаётся привязан к текущей реплике. Master switch foreground-notification подавляет все автоматические категории; ручной tap pet всё ещё позволяет посмотреть текущий контекст.
+
+Транзиентные `CHAT_MESSAGE` и `COMPLETED` имеют deadline. `RUNNING`, `WAITING_FOR_INPUT`, `FAILED` и `DISCONNECTED` не получают искусственного таймера и исчезают при реальном изменении/удалении исходной notification.
+
 ## Overlay lifecycle
 
-`OverlayService` — пользовательски включаемый `specialUse` foreground service. Он создаёт pet window до вызова `startForeground()` внутри service, использует `START_STICKY`, восстанавливает настройки из DataStore и не зависит от открытой Activity.
+`OverlayService` — пользовательски включаемый `specialUse` foreground service. Сначала он публикует обязательное foreground notification, затем создаёт pet window, использует `START_STICKY`, восстанавливает настройки из DataStore и не зависит от открытой Activity.
 
 Boot receiver запускает overlay только когда пользователь заранее включил обе опции `overlayEnabled` и `autoStart`. Любой запрет Android/MagicOS обрабатывается без crash и сохраняется только как диагностический класс ошибки.
 

@@ -18,7 +18,7 @@ object DiagnosticsExporter {
         pet: PetVisual?,
     ): String {
         val root = JSONObject()
-        root.put("schemaVersion", 2)
+        root.put("schemaVersion", 3)
         root.put("exportedAt", System.currentTimeMillis())
         root.put("sanitized", true)
         root.put("app", JSONObject()
@@ -49,8 +49,7 @@ object DiagnosticsExporter {
             .put("animationSpeed", settings.animationSpeed.toDouble())
             .put("petSizeDp", settings.petSizeDp)
             .put("completedVisibleSeconds", settings.completedVisibleSeconds)
-            .put("panelPinned", settings.panelPinned)
-            .put("autoTaskBubblesEnabled", settings.autoTaskBubblesEnabled)
+            .put("autoSpeechEnabled", settings.autoTaskBubblesEnabled)
             .put("attentionBubblesEnabled", settings.attentionBubblesEnabled)
             .put("chatMessageBubblesEnabled", settings.chatMessageBubblesEnabled)
             .put("completionBubblesEnabled", settings.completionBubblesEnabled)

@@ -36,6 +36,7 @@ internal class SpeechBubbleDrawable(
     }
     private val body = RectF()
     private val tail = Path()
+    private val tailOutline = Path()
 
     var tailEdge: TailEdge = TailEdge.RIGHT
         private set
@@ -56,7 +57,10 @@ internal class SpeechBubbleDrawable(
         canvas.drawPath(tail, fill)
         if (stroke.strokeWidth > 0f) {
             canvas.drawRoundRect(body, cornerRadiusPx, cornerRadiusPx, stroke)
-            canvas.drawPath(tail, stroke)
+            // Paint the tail once more to erase the body's stroke under its base, then outline
+            // only the two exposed sides. This avoids a dark seam inside the comic bubble.
+            canvas.drawPath(tail, fill)
+            canvas.drawPath(tailOutline, stroke)
         }
     }
 
@@ -98,6 +102,7 @@ internal class SpeechBubbleDrawable(
 
     private fun buildTail() {
         tail.reset()
+        tailOutline.reset()
         val halfBase = tailSizePx * 0.72f
         when (tailEdge) {
             TailEdge.LEFT, TailEdge.RIGHT -> {
@@ -110,17 +115,22 @@ internal class SpeechBubbleDrawable(
                 tail.moveTo(edgeX, center - halfBase)
                 tail.lineTo(pointX, center)
                 tail.lineTo(edgeX, center + halfBase)
+                tailOutline.moveTo(edgeX, center - halfBase)
+                tailOutline.lineTo(pointX, center)
+                tailOutline.lineTo(edgeX, center + halfBase)
             }
             TailEdge.TOP, TailEdge.BOTTOM -> {
-                val center = tailOffsetPx.coerceIn(
-                    body.left + cornerRadiusPx + halfBase,
-                    min(body.right - cornerRadiusPx - halfBase, body.right),
-                )
+                val minimum = body.left + cornerRadiusPx + halfBase
+                val maximum = max(minimum, min(body.right - cornerRadiusPx - halfBase, body.right))
+                val center = tailOffsetPx.coerceIn(minimum, maximum)
                 val edgeY = if (tailEdge == TailEdge.TOP) body.top else body.bottom
                 val pointY = if (tailEdge == TailEdge.TOP) bounds.top.toFloat() else bounds.bottom.toFloat()
                 tail.moveTo(center - halfBase, edgeY)
                 tail.lineTo(center, pointY)
                 tail.lineTo(center + halfBase, edgeY)
+                tailOutline.moveTo(center - halfBase, edgeY)
+                tailOutline.lineTo(center, pointY)
+                tailOutline.lineTo(center + halfBase, edgeY)
             }
         }
         tail.close()

@@ -5,6 +5,7 @@ import android.graphics.drawable.Drawable
 import com.fourerk.codexpet.diagnostics.PetCandidateDiagnostics
 
 enum class PetSource {
+    BUILT_IN,
     BUBBLE_ICON,
     CONVERSATION_PERSON_ICON,
     LARGE_ICON,

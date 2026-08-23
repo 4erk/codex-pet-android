@@ -12,6 +12,7 @@ import com.fourerk.codexpet.task.TaskKind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.Instant
 
 class ChatGptNotificationListener : NotificationListenerService() {
     override fun onCreate() {
@@ -64,7 +65,10 @@ class ChatGptNotificationListener : NotificationListenerService() {
     private fun process(sbn: StatusBarNotification, event: String, updateTask: Boolean, acceptPet: Boolean) {
         AppGraph.applicationScope.launch {
             val parsed = parse(sbn, event, acceptPet) ?: return@launch
-            if (updateTask) AppGraph.tasks.upsert(parsed.task, liveNotification = event == "POSTED")
+            if (updateTask) {
+                val task = if (event == "POSTED") parsed.task.copy(updatedAt = Instant.now()) else parsed.task
+                AppGraph.tasks.upsert(task, liveNotification = event == "POSTED")
+            }
             updateActiveCount()
         }
     }

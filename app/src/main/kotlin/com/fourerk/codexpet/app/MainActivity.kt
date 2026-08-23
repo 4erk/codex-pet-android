@@ -1,8 +1,12 @@
 package com.fourerk.codexpet.app
 
 import android.Manifest
+import android.animation.ValueAnimator
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.Animatable
+import android.graphics.drawable.AnimationDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
@@ -20,11 +24,14 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.graphics.drawable.toDrawable
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.fourerk.codexpet.R
 import com.fourerk.codexpet.notification.ChatGptNotificationListener
+import com.fourerk.codexpet.overlay.OverlayService
+import com.fourerk.codexpet.pet.PetAnimationState
 import com.fourerk.codexpet.pet.PetVisual
 import com.fourerk.codexpet.settings.AppSettings
 import com.fourerk.codexpet.settings.LongPressAction
@@ -41,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var preview: ImageView
     private lateinit var previewText: TextView
+    private lateinit var animationStatusText: TextView
     private lateinit var startButton: Button
     private lateinit var sourcePackage: EditText
     private lateinit var sizeLabel: TextView
@@ -52,7 +60,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var autoStartSwitch: SwitchMaterial
     private lateinit var completedLabel: TextView
     private lateinit var completedSeek: SeekBar
-    private lateinit var panelPinSwitch: SwitchMaterial
     private lateinit var autoTaskBubblesSwitch: SwitchMaterial
     private lateinit var attentionBubblesSwitch: SwitchMaterial
     private lateinit var chatMessageBubblesSwitch: SwitchMaterial
@@ -140,11 +147,22 @@ class MainActivity : AppCompatActivity() {
             addView(action("Обновить из notifications") {
                 ChatGptNotificationListener.refresh(this@MainActivity)
             })
-            addView(action("Импортировать оригинальный pet pack / изображение") {
-                importPet.launch(arrayOf("image/png", "image/webp", "image/*"))
+            animationStatusText = text("Проверяю доступные анимации…", 12f, 0xFFB8C0C6.toInt())
+            addView(animationStatusText)
+            addView(action("Проверить анимацию") { previewPetAnimation() })
+            addView(action("Импортировать pet pack / ZIP / изображение") {
+                importPet.launch(
+                    arrayOf(
+                        "application/zip",
+                        "application/x-zip-compressed",
+                        "image/png",
+                        "image/webp",
+                        "image/*",
+                    ),
+                )
             })
             addView(text(
-                "Pet pack: PNG/WebP 8×9 или 8×11, ячейка 192×208; также поддерживается 2×.",
+                "Pet pack: прозрачный PNG/WebP 1536×1872 либо v2 1536×2288. ZIP может содержать один такой spritesheet; пути и размер архива проверяются до импорта.",
                 12f,
                 0xFF8F989F.toInt(),
             ))
@@ -164,8 +182,7 @@ class MainActivity : AppCompatActivity() {
         speedSeek = SeekBar(this).apply { max = 150 }
         completedLabel = text(completedVisibleText(5), 13f, Color.WHITE)
         completedSeek = SeekBar(this).apply { max = 30 }
-        panelPinSwitch = toggle("Закреплять панель задач")
-        autoTaskBubblesSwitch = toggle("Автоматически показывать текущие задачи")
+        autoTaskBubblesSwitch = toggle("Автоматические реплики — общий выключатель")
         attentionBubblesSwitch = toggle("Показывать ошибки, потерю связи и ожидание ответа")
         chatMessageBubblesSwitch = toggle("Показывать сообщения из других чатов ChatGPT")
         completionBubblesSwitch = toggle("Показывать завершение задачи")
@@ -194,11 +211,15 @@ class MainActivity : AppCompatActivity() {
             addView(speedSeek)
             addView(completedLabel)
             addView(completedSeek)
-            addView(panelPinSwitch)
             addView(autoTaskBubblesSwitch)
             addView(attentionBubblesSwitch)
             addView(chatMessageBubblesSwitch)
             addView(completionBubblesSwitch)
+            addView(text(
+                "Выполнение показывается, пока активно. Сообщения и «готово» исчезают по таймеру. Ожидание ответа, ошибка и потеря связи остаются до изменения или удаления уведомления. Быстрый выключатель в уведомлении отключает все автоматические реплики.",
+                12f,
+                0xFF8F989F.toInt(),
+            ))
             addView(autoStartSwitch)
             addView(text("Долгое нажатие", 12f, 0xFF8F989F.toInt()))
             addView(longPressSpinner)
@@ -251,9 +272,6 @@ class MainActivity : AppCompatActivity() {
         autoStartSwitch.setOnCheckedChangeListener { _, checked ->
             if (!bindingSettings) lifecycleScope.launch { AppGraph.settings.setAutoStart(checked) }
         }
-        panelPinSwitch.setOnCheckedChangeListener { _, checked ->
-            if (!bindingSettings) lifecycleScope.launch { AppGraph.settings.setPanelPinned(checked) }
-        }
         autoTaskBubblesSwitch.setOnCheckedChangeListener { _, checked ->
             if (!bindingSettings) lifecycleScope.launch { AppGraph.settings.setAutoTaskBubblesEnabled(checked) }
         }
@@ -298,7 +316,6 @@ class MainActivity : AppCompatActivity() {
         speedLabel.text = getString(R.string.animation_speed_format, settings.animationSpeed)
         completedSeek.progress = settings.completedVisibleSeconds
         completedLabel.text = completedVisibleText(settings.completedVisibleSeconds)
-        panelPinSwitch.isChecked = settings.panelPinned
         autoTaskBubblesSwitch.isChecked = settings.autoTaskBubblesEnabled
         attentionBubblesSwitch.isChecked = settings.attentionBubblesEnabled
         chatMessageBubblesSwitch.isChecked = settings.chatMessageBubblesEnabled
@@ -306,10 +323,34 @@ class MainActivity : AppCompatActivity() {
         autoStartSwitch.isChecked = settings.autoStart
         longPressSpinner.setSelection(settings.longPressAction.ordinal, false)
         bindingSettings = false
+        if (::preview.isInitialized) renderPet(AppGraph.pets.visual.value)
     }
 
     private fun renderPet(pet: PetVisual?) {
-        preview.setImageBitmap(pet?.bitmap)
+        (preview.drawable as? Animatable)?.stop()
+        if (pet != null && pet.frameSequences.isNotEmpty() &&
+            AppGraph.settings.settings.value.animationsEnabled && ValueAnimator.areAnimatorsEnabled()
+        ) {
+            val idle = pet.frameSequences[PetAnimationState.IDLE]
+            if (idle != null) {
+                val animation = AnimationDrawable().apply {
+                    isOneShot = false
+                    val speed = AppGraph.settings.settings.value.animationSpeed.coerceIn(0.5f, 2f)
+                    idle.frames.forEachIndexed { index, frame ->
+                        addFrame(
+                            frame.toDrawable(resources).apply { isFilterBitmap = true },
+                            (idle.frameDurationsMs.getOrElse(index) { 150 } / speed).roundToInt().coerceAtLeast(40),
+                        )
+                    }
+                }
+                preview.setImageDrawable(animation)
+                preview.post(animation::start)
+            } else {
+                preview.setImageBitmap(pet.bitmap)
+            }
+        } else {
+            preview.setImageBitmap(pet?.bitmap)
+        }
         val scale = pet?.let {
             AppGraph.settings.settings.value.petSizeDp * resources.displayMetrics.density / it.bitmap.height
         }
@@ -323,6 +364,41 @@ class MainActivity : AppCompatActivity() {
             }
             pet.hasMeaningfulTransparency -> "Источник: ${pet.source.name} · SHA-256 ${pet.hash.take(12)}… · alpha сохранён"
             else -> "Источник: ${pet.source.name} · изображение почти непрозрачное; используйте Diagnostics"
+        }
+        animationStatusText.text = when {
+            pet == null -> "Анимация: питомец ещё не загружен"
+            pet.frameSequences.isEmpty() ->
+                "Анимация: недоступна — notification предоставляет только статичный кадр. Импортируйте полный pet pack или ZIP."
+            !AppGraph.settings.settings.value.animationsEnabled ->
+                "Анимация: pack содержит ${pet.frameSequences.size}/9 состояний, но переключатель анимации выключен."
+            !ValueAnimator.areAnimatorsEnabled() ->
+                "Анимация: pack готов, но системный масштаб анимаций Android отключён."
+            else -> "Анимация: ${pet.frameSequences.size}/9 состояний готовы" +
+                if (pet.lookDirections.size == 16) " · 16 направлений взгляда" else ""
+        }
+    }
+
+    private fun previewPetAnimation() {
+        val pet = AppGraph.pets.visual.value
+        if (pet?.frameSequences.isNullOrEmpty()) {
+            toast("Это статичный кадр. Для анимаций импортируйте полный pet pack или ZIP.")
+            return
+        }
+        lifecycleScope.launch {
+            if (!AppGraph.settings.settings.value.animationsEnabled) {
+                AppGraph.settings.setAnimationsEnabled(true)
+            }
+            val overlayEnabled = AppGraph.settings.settings.value.overlayEnabled
+            if (overlayEnabled) {
+                startService(Intent(this@MainActivity, OverlayService::class.java).setAction(
+                    OverlayService.ACTION_PREVIEW_ANIMATION,
+                ))
+            }
+            renderPet(pet)
+            toast(
+                if (overlayEnabled) "Запущены idle в preview и wave/jump у overlay"
+                else "Запущена idle-анимация в preview; для overlay сначала включите питомца",
+            )
         }
     }
 
