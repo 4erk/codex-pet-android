@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
@@ -55,7 +56,6 @@ class AppUpdateManager(
                 if (!force && System.currentTimeMillis() - currentSettings.lastUpdateCheckAt < CHECK_INTERVAL_MS) {
                     return@withLock
                 }
-                if (rejectDebugBuild()) return@withLock
                 performCheck(force)
             }
         }
@@ -63,10 +63,7 @@ class AppUpdateManager(
 
     fun checkNow(force: Boolean = true) {
         scope.launch {
-            mutex.withLock {
-                if (rejectDebugBuild()) return@withLock
-                performCheck(force)
-            }
+            mutex.withLock { performCheck(force) }
         }
     }
 
@@ -74,7 +71,6 @@ class AppUpdateManager(
         scope.launch {
             mutex.withLock {
                 val release = availableRelease ?: run {
-                    if (rejectDebugBuild()) return@withLock
                     performCheck(force = true)
                     availableRelease
                 } ?: return@withLock
@@ -85,9 +81,7 @@ class AppUpdateManager(
 
     fun prepareManualApk(uri: Uri) {
         scope.launch {
-            mutex.withLock {
-                prepareManualApkInternal(uri)
-            }
+            mutex.withLock { prepareManualApkInternal(uri) }
         }
     }
 
@@ -100,7 +94,6 @@ class AppUpdateManager(
                 }
 
                 val release = availableRelease ?: run {
-                    if (rejectDebugBuild()) return@withLock
                     performCheck(force = true)
                     availableRelease
                 } ?: return@withLock
@@ -129,6 +122,13 @@ class AppUpdateManager(
         }.isSuccess
     }
 
+    fun openStableApp(): Boolean {
+        val launch = context.packageManager.getLaunchIntentForPackage(PRODUCTION_APPLICATION_ID) ?: return false
+        return runCatching {
+            context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.isSuccess
+    }
+
     internal fun onInstallerStatus(status: Int, message: String?) {
         if (status == PackageInstaller.STATUS_SUCCESS) {
             clearDownloadedUpdate(deleteFile = true)
@@ -140,26 +140,20 @@ class AppUpdateManager(
                 PackageInstaller.STATUS_PENDING_USER_ACTION -> UpdatePhase.INSTALLING
                 else -> UpdatePhase.ERROR
             },
-            message = message,
+            message = when {
+                status == PackageInstaller.STATUS_SUCCESS && BuildConfig.DEBUG ->
+                    "Стабильная версия установлена. Тестовую сборку можно оставить для проверки или удалить."
+                status == PackageInstaller.STATUS_SUCCESS -> "Обновление установлено"
+                else -> message
+            },
         )
-    }
-
-    private fun rejectDebugBuild(): Boolean {
-        if (!BuildConfig.DEBUG) return false
-        mutableState.value = UpdateState(
-            phase = UpdatePhase.INCOMPATIBLE_BUILD,
-            currentVersion = BuildConfig.VERSION_NAME,
-            message = "Это debug-сборка. Автообновление включается после одноразовой установки stable APK из GitHub Release. Ручной APK можно выбрать ниже, если он относится к этой же debug-сборке и подписан тем же ключом.",
-            checkedAt = System.currentTimeMillis(),
-        )
-        return true
     }
 
     private suspend fun prepareManualApkInternal(uri: Uri) = withContext(Dispatchers.IO) {
         mutableState.value = UpdateState(
             phase = UpdatePhase.VALIDATING_MANUAL,
             currentVersion = BuildConfig.VERSION_NAME,
-            message = "Проверяю APK из файла…",
+            message = "Проверяю APK…",
             source = UpdateSource.LOCAL_FILE,
         )
 
@@ -182,14 +176,14 @@ class AppUpdateManager(
                         val count = source.read(buffer)
                         if (count < 0) break
                         copiedBytes += count
-                        require(copiedBytes <= MAX_APK_BYTES) { "APK превысил лимит размера" }
+                        require(copiedBytes <= MAX_APK_BYTES) { "APK слишком большой" }
                         output.write(buffer, 0, count)
                     }
                 }
             }
             require(copiedBytes > 0L) { "Выбран пустой файл" }
 
-            val validated = validateApkIdentity(temporary, requireNewer = true)
+            val validated = validateManualApk(temporary)
             val target = File(directory, "manual-codex-pet-${validated.versionCode}.apk")
             if (target.exists()) target.delete()
             require(temporary.renameTo(target) || runCatching {
@@ -205,7 +199,11 @@ class AppUpdateManager(
                 currentVersion = BuildConfig.VERSION_NAME,
                 latestVersion = validated.versionName,
                 progressPercent = 100,
-                message = "APK ${validated.versionName} проверен: это более новая версия Codex Pet с той же подписью. Осталось подтвердить установку Android.",
+                message = if (BuildConfig.DEBUG && validated.packageName == PRODUCTION_APPLICATION_ID) {
+                    "Стабильная версия ${validated.versionName} проверена и готова к установке."
+                } else {
+                    "Версия ${validated.versionName} проверена и готова к установке."
+                },
                 source = UpdateSource.LOCAL_FILE,
             )
         } catch (error: Throwable) {
@@ -214,7 +212,7 @@ class AppUpdateManager(
             mutableState.value = UpdateState(
                 phase = UpdatePhase.ERROR,
                 currentVersion = BuildConfig.VERSION_NAME,
-                message = "Ручное обновление отклонено: ${error.message ?: error.javaClass.simpleName}",
+                message = "APK отклонён: ${error.message ?: error.javaClass.simpleName}",
                 source = UpdateSource.LOCAL_FILE,
             )
         }
@@ -227,13 +225,11 @@ class AppUpdateManager(
         mutableState.value = mutableState.value.copy(
             phase = UpdatePhase.CHECKING,
             progressPercent = null,
-            message = "Проверяю GitHub Release…",
+            message = "Проверяю GitHub…",
             source = UpdateSource.GITHUB,
         )
         runCatching { fetchLatestRelease() }
             .onFailure { error ->
-                // Do not persist this timestamp as a successful check. The foreground pulse can
-                // retry soon after a temporary offline/GitHub failure instead of waiting 6 hours.
                 mutableState.value = mutableState.value.copy(
                     phase = UpdatePhase.ERROR,
                     message = "Не удалось проверить обновление: ${error.message ?: error.javaClass.simpleName}",
@@ -243,7 +239,13 @@ class AppUpdateManager(
             }
             .onSuccess { release ->
                 settings.setLastUpdateCheckAt(now)
-                if (!SemanticVersion.isNewer(release.version, BuildConfig.VERSION_NAME)) {
+                val installedStable = installedPackageOrNull(PRODUCTION_APPLICATION_ID)
+                val stableVersion = installedStable?.versionName
+                val needsInstall = installedStable == null ||
+                    stableVersion.isNullOrBlank() ||
+                    SemanticVersion.isNewer(release.version, stableVersion)
+
+                if (!needsInstall) {
                     availableRelease = null
                     clearDownloadedUpdate(deleteFile = true)
                     cleanupUpdateCache()
@@ -253,7 +255,11 @@ class AppUpdateManager(
                         currentVersion = BuildConfig.VERSION_NAME,
                         latestVersion = release.version,
                         releaseUrl = release.htmlUrl,
-                        message = "Установлена актуальная версия",
+                        message = if (BuildConfig.DEBUG) {
+                            "Стабильная версия ${stableVersion ?: release.version} уже установлена"
+                        } else {
+                            "Установлена актуальная версия"
+                        },
                         checkedAt = now,
                         source = UpdateSource.GITHUB,
                     )
@@ -269,7 +275,11 @@ class AppUpdateManager(
                     currentVersion = BuildConfig.VERSION_NAME,
                     latestVersion = release.version,
                     releaseUrl = release.htmlUrl,
-                    message = "Доступна версия ${release.version}",
+                    message = if (BuildConfig.DEBUG && installedStable == null) {
+                        "Доступна стабильная версия ${release.version}"
+                    } else {
+                        "Доступна версия ${release.version}"
+                    },
                     checkedAt = now,
                     source = UpdateSource.GITHUB,
                 )
@@ -294,14 +304,14 @@ class AppUpdateManager(
             require(connection.responseCode == 200) { "GitHub HTTP ${connection.responseCode}" }
             val json = connection.inputStream.bufferedReader().use { reader ->
                 val text = reader.readText()
-                require(text.length <= MAX_RELEASE_JSON_CHARS) { "GitHub response is too large" }
+                require(text.length <= MAX_RELEASE_JSON_CHARS) { "Ответ GitHub слишком большой" }
                 JSONObject(text)
             }
             require(!json.optBoolean("draft", false) && !json.optBoolean("prerelease", false)) {
-                "Latest release is not stable"
+                "Последняя версия GitHub не является стабильной"
             }
             val version = json.getString("tag_name").removePrefix("v")
-            require(VERSION_PATTERN.matches(version)) { "Некорректный stable tag GitHub: $version" }
+            require(VERSION_PATTERN.matches(version)) { "Некорректный номер версии: $version" }
             val assetsJson = json.getJSONArray("assets")
             val assets = buildList {
                 for (index in 0 until assetsJson.length()) {
@@ -317,15 +327,15 @@ class AppUpdateManager(
                 }
             }
             val selected = requireNotNull(ReleaseAssetSelector.select(assets, version)) {
-                "В latest GitHub Release нет codex-pet-$version.apk"
+                "В выпуске GitHub нет codex-pet-$version.apk"
             }
             val assetUri = Uri.parse(selected.downloadUrl)
             require(assetUri.scheme == "https" && assetUri.host.equals("github.com", ignoreCase = true)) {
-                "APK URL должен быть HTTPS GitHub"
+                "APK должен загружаться только по HTTPS с GitHub"
             }
             require(selected.size in 1..MAX_APK_BYTES) { "Некорректный размер APK" }
             require(SHA256_DIGEST.matches(selected.digest.orEmpty())) {
-                "GitHub Release не содержит корректный SHA-256 digest для APK"
+                "GitHub не вернул контрольную сумму APK"
             }
             StableReleaseInfo(
                 version = version,
@@ -357,8 +367,8 @@ class AppUpdateManager(
             setRequestProperty("User-Agent", "Codex-Pet/${BuildConfig.VERSION_NAME}")
         }
         try {
-            require(connection.responseCode in 200..299) { "APK HTTP ${connection.responseCode}" }
-            require(connection.url.protocol.equals("https", ignoreCase = true)) { "APK redirect left HTTPS" }
+            require(connection.responseCode in 200..299) { "Ошибка загрузки APK: HTTP ${connection.responseCode}" }
+            require(connection.url.protocol.equals("https", ignoreCase = true)) { "Загрузка APK вышла за пределы HTTPS" }
             val expectedLength = connection.contentLengthLong.takeIf { it > 0 } ?: release.asset.size
             require(expectedLength <= MAX_APK_BYTES) { "APK слишком большой" }
             var downloadedBytes = 0L
@@ -369,7 +379,7 @@ class AppUpdateManager(
                         val count = input.read(buffer)
                         if (count < 0) break
                         downloadedBytes += count
-                        require(downloadedBytes <= MAX_APK_BYTES) { "APK превысил лимит размера" }
+                        require(downloadedBytes <= MAX_APK_BYTES) { "APK превысил допустимый размер" }
                         digest.update(buffer, 0, count)
                         output.write(buffer, 0, count)
                         val progress = if (expectedLength > 0) {
@@ -379,13 +389,11 @@ class AppUpdateManager(
                     }
                 }
             }
-            require(downloadedBytes == release.asset.size) {
-                "Размер APK не совпал с GitHub Release"
-            }
+            require(downloadedBytes == release.asset.size) { "Размер APK не совпал с выпуском GitHub" }
             val actualDigest = digest.digest().joinToString("") { "%02x".format(it) }
             val expectedDigest = release.asset.digest!!.substringAfter("sha256:").lowercase()
-            require(actualDigest == expectedDigest) { "SHA-256 APK не совпал с GitHub Release" }
-            validateApkIdentity(temporary)
+            require(actualDigest == expectedDigest) { "Контрольная сумма APK не совпала" }
+            validateReleaseApk(temporary, release.version)
             if (target.exists()) target.delete()
             require(temporary.renameTo(target) || runCatching {
                 temporary.copyTo(target, overwrite = true)
@@ -397,7 +405,11 @@ class AppUpdateManager(
             mutableState.value = mutableState.value.copy(
                 phase = UpdatePhase.READY_TO_INSTALL,
                 progressPercent = 100,
-                message = "${release.version} скачана и проверена. Осталось подтвердить установку Android.",
+                message = if (BuildConfig.DEBUG) {
+                    "Стабильная версия ${release.version} скачана и проверена"
+                } else {
+                    "Версия ${release.version} скачана и проверена"
+                },
                 source = UpdateSource.GITHUB,
             )
             postUpdateNotification(release, ready = true)
@@ -416,43 +428,94 @@ class AppUpdateManager(
     }
 
     @Suppress("DEPRECATION")
-    private fun validateApkIdentity(file: File, requireNewer: Boolean = false): ValidatedApk {
-        val archive = requireNotNull(
-            context.packageManager.getPackageArchiveInfo(file.absolutePath, PackageManager.GET_SIGNING_CERTIFICATES),
-        ) { "Android не распознал APK" }
-        require(archive.packageName == context.packageName) {
-            "APK предназначен для ${archive.packageName}, а установлено ${context.packageName}"
+    private fun validateReleaseApk(file: File, expectedVersion: String): ValidatedApk {
+        val archive = archiveInfo(file)
+        require(archive.packageName == PRODUCTION_APPLICATION_ID) {
+            "Неверное приложение в APK: ${archive.packageName}"
         }
-        val installed = context.packageManager.getPackageInfo(
-            context.packageName,
-            PackageManager.GET_SIGNING_CERTIFICATES,
-        )
-        val installedCerts = installed.signingInfo?.apkContentsSigners.orEmpty()
-            .map { sha256(it.toByteArray()) }
-            .toSet()
-        val archiveCerts = archive.signingInfo?.apkContentsSigners.orEmpty()
-            .map { sha256(it.toByteArray()) }
-            .toSet()
-        require(installedCerts.isNotEmpty() && installedCerts == archiveCerts) {
-            "Подпись APK не совпадает с установленным Codex Pet"
+        requireReleaseCertificate(archive)
+        val versionName = archive.versionName?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("В APK нет номера версии")
+        require(SemanticVersion.compare(versionName, expectedVersion) == 0) {
+            "Версия APK $versionName не совпадает с выпуском $expectedVersion"
         }
-        if (requireNewer) {
-            require(ManualApkPolicy.isUpgrade(archive.longVersionCode, installed.longVersionCode)) {
-                "APK не новее установленной версии: versionCode ${archive.longVersionCode} ≤ ${installed.longVersionCode}"
+        val installed = installedPackageOrNull(PRODUCTION_APPLICATION_ID)
+        if (installed != null) {
+            require(archive.longVersionCode > installed.longVersionCode) {
+                "Эта версия уже установлена или старее"
             }
         }
-        return ValidatedApk(
-            versionName = archive.versionName?.takeIf { it.isNotBlank() }
-                ?: "versionCode ${archive.longVersionCode}",
-            versionCode = archive.longVersionCode,
-        )
+        return ValidatedApk(versionName, archive.longVersionCode, archive.packageName)
     }
 
+    @Suppress("DEPRECATION")
+    private fun validateManualApk(file: File): ValidatedApk {
+        val archive = archiveInfo(file)
+        val versionName = archive.versionName?.takeIf { it.isNotBlank() }
+            ?: "сборка ${archive.longVersionCode}"
+
+        if (BuildConfig.DEBUG && archive.packageName == PRODUCTION_APPLICATION_ID) {
+            requireReleaseCertificate(archive)
+            installedPackageOrNull(PRODUCTION_APPLICATION_ID)?.let { installed ->
+                require(archive.longVersionCode > installed.longVersionCode) {
+                    "Эта стабильная версия уже установлена или старее"
+                }
+            }
+            return ValidatedApk(versionName, archive.longVersionCode, archive.packageName)
+        }
+
+        require(archive.packageName == context.packageName) {
+            "APK относится к другому приложению"
+        }
+        val installed = requireNotNull(installedPackageOrNull(context.packageName)) {
+            "Не удалось определить установленную версию"
+        }
+        val installedCerts = signingCertificateHashes(installed)
+        val archiveCerts = signingCertificateHashes(archive)
+        require(installedCerts.isNotEmpty() && installedCerts == archiveCerts) {
+            "Подпись APK не совпадает с установленным приложением"
+        }
+        require(ManualApkPolicy.isUpgrade(archive.longVersionCode, installed.longVersionCode)) {
+            "Выбранная версия не новее установленной"
+        }
+        return ValidatedApk(versionName, archive.longVersionCode, archive.packageName)
+    }
+
+    private fun requireReleaseCertificate(info: PackageInfo) {
+        val archiveCerts = signingCertificateHashes(info)
+        require(archiveCerts == setOf(EXPECTED_RELEASE_CERT_SHA256)) {
+            "Подпись APK не совпадает с официальной подписью Codex Pet"
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun archiveInfo(file: File): PackageInfo = requireNotNull(
+        context.packageManager.getPackageArchiveInfo(file.absolutePath, PackageManager.GET_SIGNING_CERTIFICATES),
+    ) { "Android не распознал APK" }
+
+    @Suppress("DEPRECATION")
+    private fun installedPackageOrNull(packageName: String): PackageInfo? = runCatching {
+        context.packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+    }.getOrNull()
+
+    private fun signingCertificateHashes(info: PackageInfo): Set<String> =
+        info.signingInfo?.apkContentsSigners.orEmpty()
+            .map { sha256(it.toByteArray()) }
+            .toSet()
+
     private fun startInstall(file: File) {
+        val targetPackage = runCatching { archiveInfo(file).packageName }.getOrNull()
+        if (targetPackage.isNullOrBlank()) {
+            mutableState.value = mutableState.value.copy(
+                phase = UpdatePhase.ERROR,
+                message = "Android не распознал APK",
+            )
+            return
+        }
         if (!context.packageManager.canRequestPackageInstalls()) {
             mutableState.value = mutableState.value.copy(
                 phase = UpdatePhase.NEEDS_INSTALL_PERMISSION,
-                message = "Разрешите Codex Pet устанавливать обновления из этого источника",
+                message = "Разрешите Codex Pet устанавливать обновления",
             )
             runCatching {
                 context.startActivity(
@@ -464,7 +527,7 @@ class AppUpdateManager(
             }.onFailure { error ->
                 mutableState.value = mutableState.value.copy(
                     phase = UpdatePhase.ERROR,
-                    message = "Не удалось открыть разрешение установки: ${error.javaClass.simpleName}",
+                    message = "Не удалось открыть системное разрешение: ${error.javaClass.simpleName}",
                 )
             }
             return
@@ -474,7 +537,7 @@ class AppUpdateManager(
         var sessionId: Int? = null
         runCatching {
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-                setAppPackageName(context.packageName)
+                setAppPackageName(targetPackage)
                 if (Build.VERSION.SDK_INT >= 31) {
                     setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED)
                 }
@@ -496,7 +559,7 @@ class AppUpdateManager(
                 )
                 mutableState.value = mutableState.value.copy(
                     phase = UpdatePhase.INSTALLING,
-                    message = "Передаю APK системному установщику…",
+                    message = "Открываю системную установку…",
                 )
                 session.commit(callback.intentSender)
             }
@@ -504,7 +567,7 @@ class AppUpdateManager(
             sessionId?.let { id -> runCatching { installer.abandonSession(id) } }
             mutableState.value = mutableState.value.copy(
                 phase = UpdatePhase.ERROR,
-                message = "Не удалось запустить установку: ${error.message ?: error.javaClass.simpleName}",
+                message = "Не удалось начать установку: ${error.message ?: error.javaClass.simpleName}",
             )
         }
     }
@@ -522,7 +585,7 @@ class AppUpdateManager(
                 UPDATE_CHANNEL_ID,
                 "Обновления Codex Pet",
                 NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply { description = "Новые стабильные версии из GitHub Releases" },
+            ).apply { description = "Новые версии Codex Pet из GitHub" },
         )
         val open = PendingIntent.getActivity(
             context,
@@ -535,7 +598,7 @@ class AppUpdateManager(
             NotificationCompat.Builder(context, UPDATE_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(if (ready) "Codex Pet ${release.version} готов" else "Доступен Codex Pet ${release.version}")
-                .setContentText(if (ready) "APK проверен — нажмите для установки" else "Откройте обновление")
+                .setContentText(if (ready) "Нажмите для установки" else "Нажмите, чтобы открыть обновление")
                 .setContentIntent(open)
                 .setAutoCancel(true)
                 .setOnlyAlertOnce(true)
@@ -568,9 +631,12 @@ class AppUpdateManager(
     private data class ValidatedApk(
         val versionName: String,
         val versionCode: Long,
+        val packageName: String,
     )
 
     private companion object {
+        const val PRODUCTION_APPLICATION_ID = "com.mr4erk.codexpet"
+        const val EXPECTED_RELEASE_CERT_SHA256 = "d6200054b397e388146862d605d0aeea3c98f43af5040d7cef2ac274095a9b96"
         const val CHECK_INTERVAL_MS = 6L * 60L * 60L * 1_000L
         const val MAX_RELEASE_JSON_CHARS = 1_000_000
         const val MAX_APK_BYTES = 120L * 1024L * 1024L

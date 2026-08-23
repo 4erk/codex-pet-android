@@ -19,11 +19,11 @@ import com.fourerk.codexpet.overlay.SpeechBubblePlacement
 import com.fourerk.codexpet.overlay.TailEdge
 import kotlin.math.roundToInt
 
-/** Interactive production preview for 1–5 real speech bubble drawables and placement rules. */
 class BubbleLabActivity : AppCompatActivity() {
     private lateinit var stage: FrameLayout
     private lateinit var petView: ImageView
     private lateinit var status: TextView
+    private lateinit var countSegments: LinearLayout
     private val bubbles = mutableListOf<LabBubble>()
     private var count = 5
     private var downX = 0f
@@ -40,67 +40,76 @@ class BubbleLabActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildContent(): View {
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(PetUi.dp(this@BubbleLabActivity, 18), PetUi.dp(this@BubbleLabActivity, 20), PetUi.dp(this@BubbleLabActivity, 18), PetUi.dp(this@BubbleLabActivity, 36))
-            setBackgroundColor(PetUi.BACKGROUND)
-        }
-        body.addView(PetUi.text(this, "Стенд баблов", 28f, PetUi.TEXT, bold = true))
-        body.addView(PetUi.text(this, "Проверка 1–5 реплик без ожидания уведомлений. Пета можно таскать по стенду.", 14f, PetUi.MUTED))
+    override fun onResume() {
+        super.onResume()
+        if (::stage.isInitialized) stage.post(::renderBubbles)
+    }
 
-        val preview = PetUi.card(this, "Живой макет")
-        status = PetUi.text(this, "5 реплик", 12f, PetUi.MUTED)
-        preview.addView(status)
-        stage = FrameLayout(this).apply {
-            clipChildren = false
-            clipToPadding = false
-            background = PetUi.rounded(this@BubbleLabActivity, PetUi.SURFACE_ALT, 20)
+    private fun buildContent(): View {
+        val body = PetUi.page(
+            this,
+            "Стенд",
+            "Проверка 1–5 реплик без реальных уведомлений. Питомца можно перетаскивать.",
+        )
+
+        val preview = PetUi.heroCard(this)
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(PetUi.text(this@BubbleLabActivity, "Предпросмотр", 17f, PetUi.TEXT, bold = true), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            status = PetUi.valuePill(this@BubbleLabActivity, "5 реплик")
+            addView(status)
         }
-        preview.addView(stage, LinearLayout.LayoutParams.MATCH_PARENT, PetUi.dp(this, 420))
+        preview.addView(header)
+        preview.addView(PetUi.helper(this, "Перетащите питомца к краям: баблы должны менять сторону без мерцания и оставаться внутри видимой области."))
+        stage = PetUi.previewSurface(this)
+        preview.addView(stage, LinearLayout.LayoutParams.MATCH_PARENT, PetUi.dp(this, 420).apply { })
         body.addView(preview, PetUi.marginParams(this, 16))
 
-        val controls = PetUi.card(this, "Количество")
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        (1..5).forEach { value ->
-            row.addView(
-                PetUi.action(this, value.toString()) {
-                    count = value
-                    renderBubbles()
-                },
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
-            )
-        }
-        controls.addView(row)
-        controls.addView(PetUi.text(
+        body.addView(PetUi.sectionTitle(this, "Количество"))
+        val controls = PetUi.card(this)
+        countSegments = PetUi.segmented(
             this,
-            "Проверяются те же правила: сторона относительно пета, fallback сверху/снизу, safe bounds, хвост и компактный stack. Масштаб берётся из текущих настроек реплик.",
-            12f,
-            PetUi.MUTED,
-        ))
-        body.addView(controls, PetUi.marginParams(this))
+            labels = listOf("1", "2", "3", "4", "5"),
+            selected = count - 1,
+        ) { index ->
+            count = index + 1
+            renderBubbles()
+        }
+        controls.addView(countSegments)
+        controls.addView(PetUi.helper(this, "Первая реплика специально однострочная — она проверяет положение бокового хвоста на минимальной высоте."))
+        body.addView(controls, PetUi.marginParams(this, 4))
 
-        body.addView(PetUi.card(this, "Связанные настройки").apply {
-            addView(PetUi.action(this@BubbleLabActivity, "Реплики и масштаб") {
+        body.addView(PetUi.sectionTitle(this, "Настройки"))
+        body.addView(PetUi.card(this).apply {
+            addView(PetUi.navigationRow(this@BubbleLabActivity, "◰", "Реплики", "Масштаб и правила показа") {
                 startActivity(Intent(this@BubbleLabActivity, SpeechSettingsActivity::class.java))
             })
-            addView(PetUi.action(this@BubbleLabActivity, "Анимации пета") {
+            PetUi.addDivider(this, this@BubbleLabActivity)
+            addView(PetUi.navigationRow(this@BubbleLabActivity, "✦", "Анимации", "Состояния питомца") {
                 startActivity(Intent(this@BubbleLabActivity, AnimationSettingsActivity::class.java))
             })
-        }, PetUi.marginParams(this))
+        }, PetUi.marginParams(this, 4))
 
         petView = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
             setImageBitmap(AppGraph.pets.visual.value?.bitmap)
-            contentDescription = "Тестовый питомец — перетащите"
+            contentDescription = "Питомец — перетащите"
             setOnTouchListener(::onPetTouch)
         }
         stage.addView(
             petView,
-            FrameLayout.LayoutParams(PetUi.dp(this, AppGraph.settings.settings.value.petSizeDp), PetUi.dp(this, AppGraph.settings.settings.value.petSizeDp)),
+            FrameLayout.LayoutParams(
+                PetUi.dp(this, AppGraph.settings.settings.value.petSizeDp),
+                PetUi.dp(this, AppGraph.settings.settings.value.petSizeDp),
+            ),
         )
 
-        return ScrollView(this).apply { addView(body) }
+        return ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(body)
+        }
     }
 
     private fun centerPet() {
@@ -118,8 +127,10 @@ class BubbleLabActivity : AppCompatActivity() {
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
-                view.x = (downPetX + event.rawX - downX).coerceIn(0f, (stage.width - view.width).coerceAtLeast(0).toFloat())
-                view.y = (downPetY + event.rawY - downY).coerceIn(0f, (stage.height - view.height).coerceAtLeast(0).toFloat())
+                view.x = (downPetX + event.rawX - downX)
+                    .coerceIn(0f, (stage.width - view.width).coerceAtLeast(0).toFloat())
+                view.y = (downPetY + event.rawY - downY)
+                    .coerceIn(0f, (stage.height - view.height).coerceAtLeast(0).toFloat())
                 layoutBubbles()
                 return true
             }
@@ -132,18 +143,28 @@ class BubbleLabActivity : AppCompatActivity() {
     }
 
     private fun renderBubbles() {
+        if (!::stage.isInitialized) return
         bubbles.forEach { stage.removeView(it.root) }
         bubbles.clear()
+        PetUi.setSegmentedSelection(countSegments, count - 1)
+
         val settings = AppGraph.settings.settings.value
         val scale = settings.bubbleScale.coerceIn(0.75f, 1.5f)
         val width = PetUi.dp(this, (190f * scale).roundToInt().coerceIn(150, 285))
         val tail = PetUi.dp(this, (11f * scale).roundToInt().coerceIn(8, 17))
+        val petSize = PetUi.dp(this, settings.petSizeDp)
+        petView.layoutParams = (petView.layoutParams as FrameLayout.LayoutParams).apply {
+            this.width = petSize
+            this.height = petSize
+        }
+        petView.setImageBitmap(AppGraph.pets.visual.value?.bitmap)
+
         val samples = listOf(
-            "Нужно подтверждение: выбрать вариант",
-            "Проверяю тесты и lint",
-            "Собираю APK и обновляю код",
-            "Связь восстановлена — продолжаю",
-            "Готово: все проверки прошли",
+            "Готово",
+            "Нужно подтверждение",
+            "Проверяю тесты",
+            "Связь восстановлена",
+            "Все проверки прошли",
         )
         repeat(count) { index ->
             val drawable = SpeechBubbleDrawable(
@@ -157,13 +178,20 @@ class BubbleLabActivity : AppCompatActivity() {
                 text = samples[index]
                 textSize = (13f * scale).coerceIn(10f, 18f)
                 setTextColor(Color.WHITE)
-                setPadding(PetUi.dp(this@BubbleLabActivity, 12), PetUi.dp(this@BubbleLabActivity, 9), PetUi.dp(this@BubbleLabActivity, 12), PetUi.dp(this@BubbleLabActivity, 9))
-                maxLines = 4
+                includeFontPadding = false
+                setPadding(
+                    PetUi.dp(this@BubbleLabActivity, (12f * scale).roundToInt().coerceAtLeast(9)),
+                    PetUi.dp(this@BubbleLabActivity, (8f * scale).roundToInt().coerceAtLeast(6)),
+                    PetUi.dp(this@BubbleLabActivity, (12f * scale).roundToInt().coerceAtLeast(9)),
+                    PetUi.dp(this@BubbleLabActivity, (8f * scale).roundToInt().coerceAtLeast(6)),
+                )
+                maxLines = if (index == 0) 1 else 3
                 gravity = Gravity.CENTER_VERTICAL
             }
             val root = FrameLayout(this).apply {
                 background = drawable
                 clipChildren = false
+                clipToPadding = false
                 addView(label, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT)
             }
             root.measure(
@@ -173,7 +201,7 @@ class BubbleLabActivity : AppCompatActivity() {
             stage.addView(root, FrameLayout.LayoutParams(width, FrameLayout.LayoutParams.WRAP_CONTENT))
             bubbles += LabBubble(root, drawable, tail)
         }
-        status.text = "$count ${when (count) { 1 -> "реплика"; in 2..4 -> "реплики"; else -> "реплик" }} · масштаб ${"%.2f".format(scale)}×"
+        status.text = "$count ${when (count) { 1 -> "реплика"; in 2..4 -> "реплики"; else -> "реплик" }} · ${"%.2f".format(scale)}×"
         stage.post(::layoutBubbles)
     }
 
@@ -187,7 +215,7 @@ class BubbleLabActivity : AppCompatActivity() {
             petY = petView.y.roundToInt(),
             petSize = petView.width,
             bubbleWidth = bubbles.first().root.measuredWidth,
-            bubbleHeights = bubbles.map { it.root.measuredHeight.coerceAtLeast(PetUi.dp(this, 48)) },
+            bubbleHeights = bubbles.map { it.root.measuredHeight.coerceAtLeast(PetUi.dp(this, 40)) },
             margin = PetUi.dp(this, (5f * scale).roundToInt().coerceIn(3, 8)),
             gap = PetUi.dp(this, (5f * scale).roundToInt().coerceIn(3, 8)),
         )

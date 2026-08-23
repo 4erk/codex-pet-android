@@ -13,6 +13,7 @@
 
     <queries>
         <package android:name="com.openai.chatgpt" />
+        <package android:name="com.mr4erk.codexpet" />
     </queries>
 
     <application
@@ -29,7 +30,6 @@
         android:usesCleartextTraffic="false">
 
         <activity android:name="com.fourerk.codexpet.app.DiagnosticsActivity" android:exported="false" />
-        <activity android:name="com.fourerk.codexpet.app.MainActivity" android:exported="false" />
         <activity android:name="com.fourerk.codexpet.app.PetSettingsActivity" android:exported="false" />
         <activity android:name="com.fourerk.codexpet.app.SpeechSettingsActivity" android:exported="false" />
         <activity android:name="com.fourerk.codexpet.app.AnimationSettingsActivity" android:exported="false" />

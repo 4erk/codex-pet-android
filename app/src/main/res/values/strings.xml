@@ -8,10 +8,10 @@
     <string name="overlay_notification_state">%1$s · %2$s</string>
     <string name="pet_visible">питомец на экране</string>
     <string name="pet_hidden">питомец скрыт</string>
-    <string name="auto_bubbles_enabled">реплики сами появляются</string>
-    <string name="auto_bubbles_disabled">авто-реплики выключены</string>
-    <string name="hide_pet">Скрыть пета</string>
-    <string name="show_pet">Показать пета</string>
+    <string name="auto_bubbles_enabled">реплики появляются автоматически</string>
+    <string name="auto_bubbles_disabled">автоматические реплики выключены</string>
+    <string name="hide_pet">Скрыть питомца</string>
+    <string name="show_pet">Показать питомца</string>
     <string name="disable_auto_bubbles">Реплики выкл.</string>
     <string name="enable_auto_bubbles">Реплики вкл.</string>
     <string name="next_speech">Следующая реплика</string>
@@ -23,7 +23,7 @@
     <string name="settings">Настройки</string>
     <string name="diagnostics">Диагностика</string>
     <string name="waiting_for_status">Пока тихо — жду значимое обновление от ChatGPT</string>
-    <string name="pet_size_format">Размер: %1$d dp</string>
+    <string name="pet_size_format">Размер: %1$d</string>
     <string name="animation_speed_format">Скорость анимации: %1$.2f×</string>
     <plurals name="completed_visible_format">
         <item quantity="one">Показывать завершённую задачу: %1$d секунду</item>

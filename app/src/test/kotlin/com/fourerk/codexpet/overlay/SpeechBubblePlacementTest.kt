@@ -8,7 +8,7 @@ class SpeechBubblePlacementTest {
     private val safe = OverlayBounds(0, 0, 1080, 1920)
 
     @Test
-    fun `single bubble stays right of pet when there is room`() {
+    fun `single bubble stays right of pet and is vertically centered`() {
         val placement = SpeechBubblePlacement.calculate(
             safe = safe,
             petX = 100,
@@ -22,8 +22,26 @@ class SpeechBubblePlacementTest {
 
         assertEquals(BubbleAnchor.LEFT, placement.anchor)
         assertEquals(188, placement.x)
-        assertEquals(700, placement.y)
-        assertEquals(40f, placement.tailOffset)
+        assertEquals(690, placement.y)
+        assertEquals(50f, placement.tailOffset)
+    }
+
+    @Test
+    fun `short single-line bubble centers its side tail on pet`() {
+        val placement = SpeechBubblePlacement.calculate(
+            safe = safe,
+            petX = 100,
+            petY = 700,
+            petSize = 80,
+            bubbleWidth = 210,
+            bubbleHeights = listOf(38),
+            margin = 8,
+            gap = 6,
+        ).single()
+
+        assertEquals(BubbleAnchor.LEFT, placement.anchor)
+        assertEquals(721, placement.y)
+        assertEquals(19f, placement.tailOffset)
     }
 
     @Test
@@ -41,7 +59,8 @@ class SpeechBubblePlacementTest {
 
         assertEquals(BubbleAnchor.RIGHT, placement.anchor)
         assertEquals(652, placement.x)
-        assertEquals(700, placement.y)
+        assertEquals(690, placement.y)
+        assertEquals(50f, placement.tailOffset)
     }
 
     @Test

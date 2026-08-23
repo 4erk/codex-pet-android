@@ -108,9 +108,12 @@ internal class SpeechBubbleDrawable(
         val overlap = max(2f, stroke.strokeWidth * 1.75f)
         when (tailEdge) {
             TailEdge.LEFT, TailEdge.RIGHT -> {
-                val center = tailOffsetPx.coerceIn(
-                    body.top + cornerRadiusPx + halfBase,
-                    max(body.top + cornerRadiusPx + halfBase, body.bottom - cornerRadiusPx - halfBase),
+                val center = SpeechBubbleTailGeometry.safeCenter(
+                    requested = tailOffsetPx,
+                    bodyStart = body.top,
+                    bodyEnd = body.bottom,
+                    cornerRadius = cornerRadiusPx,
+                    halfBase = halfBase,
                 )
                 val outlineEdgeX = if (tailEdge == TailEdge.LEFT) body.left else body.right
                 val fillEdgeX = if (tailEdge == TailEdge.LEFT) body.left + overlap else body.right - overlap
@@ -124,9 +127,13 @@ internal class SpeechBubbleDrawable(
                 tailOutline.lineTo(outlineEdgeX, center + halfBase)
             }
             TailEdge.TOP, TailEdge.BOTTOM -> {
-                val minimum = body.left + cornerRadiusPx + halfBase
-                val maximum = max(minimum, min(body.right - cornerRadiusPx - halfBase, body.right))
-                val center = tailOffsetPx.coerceIn(minimum, maximum)
+                val center = SpeechBubbleTailGeometry.safeCenter(
+                    requested = tailOffsetPx,
+                    bodyStart = body.left,
+                    bodyEnd = body.right,
+                    cornerRadius = cornerRadiusPx,
+                    halfBase = halfBase,
+                )
                 val outlineEdgeY = if (tailEdge == TailEdge.TOP) body.top else body.bottom
                 val fillEdgeY = if (tailEdge == TailEdge.TOP) body.top + overlap else body.bottom - overlap
                 val pointY = if (tailEdge == TailEdge.TOP) bounds.top.toFloat() else bounds.bottom.toFloat()

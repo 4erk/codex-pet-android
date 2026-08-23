@@ -1,10 +1,6 @@
 package com.fourerk.codexpet.app
 
-import android.graphics.Color
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -15,7 +11,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.fourerk.codexpet.BuildConfig
-import com.fourerk.codexpet.R
 import com.fourerk.codexpet.diagnostics.DiagnosticsExporter
 import com.fourerk.codexpet.diagnostics.NotificationSnapshot
 import com.fourerk.codexpet.notification.ChatGptNotificationListener
@@ -23,7 +18,6 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.roundToInt
 
 class DiagnosticsActivity : AppCompatActivity() {
     private lateinit var status: TextView
@@ -42,9 +36,9 @@ class DiagnosticsActivity : AppCompatActivity() {
                 output.writer(Charsets.UTF_8).use { it.write(json) }
             }
         }.onSuccess {
-            Toast.makeText(this, "Санитизированный JSON сохранён", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Диагностика сохранена", Toast.LENGTH_LONG).show()
         }.onFailure {
-            Toast.makeText(this, "Ошибка экспорта: ${it.message.orEmpty()}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Не удалось сохранить: ${it.message.orEmpty()}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -60,31 +54,53 @@ class DiagnosticsActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildContent(): ScrollView {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(36))
-            setBackgroundColor(getColor(R.color.codex_background))
-        }
-        root.addView(label("Diagnostics → ChatGPT notifications", 25f, Color.WHITE, true))
-        root.addView(label(
-            if (BuildConfig.DEBUG) "Debug build: тексты видны только на этом экране и никогда не входят в export." else "Release build: полный текст notifications не хранится.",
-            13f,
-            0xFFB8C0C6.toInt(),
+    private fun buildContent(): android.view.View {
+        val body = PetUi.page(
+            this,
+            "Диагностика",
+            "Технические сведения об уведомлениях ChatGPT и работе подключения.",
+        )
+
+        val hero = PetUi.heroCard(this)
+        hero.addView(PetUi.text(this, "Состояние", 17f, PetUi.TEXT, bold = true))
+        hero.addView(PetUi.helper(
+            this,
+            if (BuildConfig.DEBUG) {
+                "Тестовая сборка может показывать текст уведомлений только на этом экране. В экспорт он не попадает."
+            } else {
+                "В стабильной сборке полный текст уведомлений не сохраняется."
+            },
         ))
-        status = label("", 13f, Color.WHITE)
-        root.addView(status)
-        root.addView(button("Refresh active notifications") {
+        status = PetUi.text(this, "Проверяю…", 12f, PetUi.MUTED).apply {
+            setPadding(0, PetUi.dp(this@DiagnosticsActivity, 10), 0, PetUi.dp(this@DiagnosticsActivity, 12))
+        }
+        hero.addView(status)
+        hero.addView(PetUi.primaryAction(this, "Обновить") {
             ChatGptNotificationListener.refresh(this)
         })
-        root.addView(button("Restart notification listener") {
+        hero.addView(PetUi.action(this, "Переподключить") {
             ChatGptNotificationListener.restart(this)
+        }, PetUi.marginParams(this, 8))
+        body.addView(hero, PetUi.marginParams(this, 16))
+
+        body.addView(PetUi.sectionTitle(this, "Данные"))
+        val actions = PetUi.card(this)
+        actions.addView(PetUi.navigationRow(this, "⇧", "Экспорт", "Сохранить очищенный JSON") { export() })
+        PetUi.addDivider(actions, this)
+        actions.addView(PetUi.navigationRow(this, "×", "Очистить", "Удалить текущие диагностические снимки") {
+            AppGraph.diagnostics.clear()
         })
-        root.addView(button("Export sanitized JSON") { export() })
-        root.addView(button("Очистить snapshots") { AppGraph.diagnostics.clear() })
+        body.addView(actions, PetUi.marginParams(this, 4))
+
+        body.addView(PetUi.sectionTitle(this, "Последние уведомления"))
         snapshots = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(snapshots)
-        return ScrollView(this).apply { addView(root) }
+        body.addView(snapshots)
+
+        return ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(body)
+        }
     }
 
     private fun render() {
@@ -92,59 +108,58 @@ class DiagnosticsActivity : AppCompatActivity() {
         val listener = AppGraph.diagnostics.listener.value
         val pet = AppGraph.pets.visual.value
         status.text = buildString {
-            appendLine("Listener: ${if (listener.connected) "connected" else "disconnected"}")
-            appendLine("Source: ${listener.sourcePackage}")
-            appendLine("Active notifications: ${listener.activeNotificationCount}")
-            appendLine("Snapshots: ${AppGraph.diagnostics.snapshots.value.size}")
-            appendLine("Pet: ${pet?.source?.name ?: "not detected"}")
-            append("Pet hash: ${pet?.hash ?: "—"}")
-            listener.lastError?.let { appendLine(); append("Last error: $it") }
+            append("Подключение: ${if (listener.connected) "работает" else "не отвечает"}")
+            append("\nИсточник: ${listener.sourcePackage}")
+            append("\nАктивных уведомлений: ${listener.activeNotificationCount}")
+            append(" · снимков: ${AppGraph.diagnostics.snapshots.value.size}")
+            append("\nПитомец: ${pet?.source?.name ?: "не определён"}")
+            listener.lastError?.let { append("\nПоследняя ошибка: $it") }
         }
         snapshots.removeAllViews()
         AppGraph.diagnostics.snapshots.value.take(30).forEach { snapshot ->
-            snapshots.addView(snapshotCard(snapshot), LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(12) })
+            snapshots.addView(snapshotCard(snapshot), PetUi.marginParams(this, 8))
+        }
+        if (AppGraph.diagnostics.snapshots.value.isEmpty()) {
+            snapshots.addView(PetUi.card(this).apply {
+                addView(PetUi.helper(this@DiagnosticsActivity, "Снимков пока нет. Нажмите «Обновить» или дождитесь нового уведомления ChatGPT."))
+            })
         }
     }
 
-    private fun snapshotCard(item: NotificationSnapshot): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(14), dp(12), dp(14), dp(12))
-        background = GradientDrawable().apply {
-            setColor(getColor(R.color.codex_surface))
-            cornerRadius = dp(14).toFloat()
-        }
-        addView(label("${item.event} · id=${item.id}", 16f, Color.WHITE, true))
-        addView(label(
+    private fun snapshotCard(item: NotificationSnapshot): LinearLayout = PetUi.card(this).apply {
+        addView(PetUi.text(this@DiagnosticsActivity, "${item.event} · id=${item.id}", 14.5f, PetUi.TEXT, bold = true))
+        addView(PetUi.text(
+            this@DiagnosticsActivity,
             "key=${item.key}\npostTime=${item.postTime}\nflags=${item.flags}\ncategory=${item.category}\ngroup=${item.group}\ngroupKey=${item.groupKey}\nshortcutId=${item.shortcutId}\nchannelId=${item.channelId}\nrole=${item.notificationRole}\nstyle=${item.styleClass}",
-            11f,
-            0xFFB8C0C6.toInt(),
-        ))
-        addView(label(
+            10.5f,
+            PetUi.MUTED,
+        ).apply { setPadding(0, PetUi.dp(this@DiagnosticsActivity, 7), 0, 0) })
+        addView(PetUi.text(
+            this@DiagnosticsActivity,
             "Bubble: exists=${item.bubble.exists}, icon=${item.bubble.iconExists}, type=${item.bubble.iconTypeName}, height=${item.bubble.desiredHeight}, suppressed=${item.bubble.suppressNotification}, autoExpand=${item.bubble.autoExpandBubble}, intent=${item.bubble.bubbleIntentExists}",
-            12f,
-            0xFFD5DADD.toInt(),
-        ))
+            10.5f,
+            PetUi.SECONDARY,
+        ).apply { setPadding(0, PetUi.dp(this@DiagnosticsActivity, 7), 0, 0) })
         item.petCandidates.forEach { candidate ->
             val bitmap = candidate.bitmap
-            addView(label(
-                "Pet candidate ${candidate.source}: ${candidate.iconTypeName}, ${candidate.drawableClass}, ${bitmap?.width}×${bitmap?.height}, transparent=${bitmap?.transparentPixelPercent?.let { "%.2f".format(Locale.US, it) }}%, corners=${bitmap?.transparentCorners}, hash=${bitmap?.sha256?.take(16)}…, accepted=${candidate.acceptedForOverlay}${candidate.rejectionReason?.let { ", reason=$it" }.orEmpty()}",
-                12f,
-                if (candidate.acceptedForOverlay) 0xFF7DD3B0.toInt() else 0xFFFFB86B.toInt(),
+            addView(PetUi.text(
+                this@DiagnosticsActivity,
+                "Pet ${candidate.source}: ${candidate.iconTypeName}, ${candidate.drawableClass}, ${bitmap?.width}×${bitmap?.height}, transparent=${bitmap?.transparentPixelPercent?.let { "%.2f".format(Locale.US, it) }}%, accepted=${candidate.acceptedForOverlay}${candidate.rejectionReason?.let { ", reason=$it" }.orEmpty()}",
+                10.5f,
+                if (candidate.acceptedForOverlay) PetUi.GOOD else PetUi.WARN,
             ))
         }
-        addView(label("Extras keys: ${item.extraKeys.joinToString()}", 11f, 0xFF8F989F.toInt()))
+        addView(PetUi.text(this@DiagnosticsActivity, "Extras: ${item.extraKeys.joinToString()}", 10f, PetUi.MUTED))
         item.extras.forEach { (key, value) ->
             val debug = value.debugValue?.replace(Regex("\\s+"), " ")?.take(400)
-            addView(label(
+            addView(PetUi.text(
+                this@DiagnosticsActivity,
                 "$key: present=${value.present}, length=${value.length}${debug?.let { "\n$it" }.orEmpty()}",
-                11f,
-                if (debug == null) 0xFF8F989F.toInt() else 0xFFE7EBED.toInt(),
+                10f,
+                if (debug == null) PetUi.MUTED else PetUi.SECONDARY,
             ))
         }
-        item.parserNotes.forEach { addView(label("Note: $it", 11f, 0xFFFFD27D.toInt())) }
+        item.parserNotes.forEach { addView(PetUi.text(this@DiagnosticsActivity, "Примечание: $it", 10f, PetUi.WARN)) }
     }
 
     private fun export() {
@@ -158,19 +173,4 @@ class DiagnosticsActivity : AppCompatActivity() {
         val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         createJson.launch("codex-pet-diagnostics-$timestamp.json")
     }
-
-    private fun button(title: String, action: () -> Unit): Button = Button(this).apply {
-        text = title
-        isAllCaps = false
-        setOnClickListener { action() }
-    }
-
-    private fun label(value: CharSequence, size: Float, color: Int, bold: Boolean = false): TextView = TextView(this).apply {
-        text = value
-        textSize = size
-        setTextColor(color)
-        if (bold) setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-    }
-
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
 }
