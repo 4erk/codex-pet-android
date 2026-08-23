@@ -38,6 +38,16 @@ class PetAnimationStateResolverTest {
     }
 
     @Test
+    fun `explicit reconnect beats stale error status`() {
+        assertEquals(
+            PetAnimationState.WAITING,
+            PetAnimationStateResolver.resolve(
+                listOf(task("reconnect", TaskStatus.ERROR, TaskAnimationCue.RECONNECTING)),
+            ),
+        )
+    }
+
+    @Test
     fun `review beats ordinary work but not errors`() {
         assertEquals(
             PetAnimationState.REVIEW,
