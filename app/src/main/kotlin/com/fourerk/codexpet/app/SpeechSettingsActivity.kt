@@ -58,7 +58,7 @@ class SpeechSettingsActivity : AppCompatActivity() {
         previewCard.addView(PetUi.text(this, "Предпросмотр", 17f, PetUi.TEXT, bold = true))
         previewCard.addView(PetUi.text(
             this,
-            "Короткая строка специально показывает самый чувствительный случай для бокового хвоста.",
+            "Короткая строка показывает самый чувствительный случай для бокового хвоста.",
             11.5f,
             PetUi.MUTED,
         ).apply { setPadding(0, PetUi.dp(this@SpeechSettingsActivity, 4), 0, PetUi.dp(this@SpeechSettingsActivity, 12)) })
@@ -92,7 +92,10 @@ class SpeechSettingsActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, PetUi.dp(this@SpeechSettingsActivity, 14), 0, 0)
-            addView(PetUi.text(this@SpeechSettingsActivity, "Масштаб", 14.5f, PetUi.TEXT, bold = true), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(
+                PetUi.text(this@SpeechSettingsActivity, "Масштаб", 14.5f, PetUi.TEXT, bold = true),
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+            )
             bubbleScaleValue = PetUi.valuePill(this@SpeechSettingsActivity, "1.00×")
             addView(bubbleScaleValue)
         }
@@ -114,7 +117,12 @@ class SpeechSettingsActivity : AppCompatActivity() {
         }
         voiceCard.addView(styleSegments)
         styleExample = PetUi.text(this, "", 12f, PetUi.MUTED).apply {
-            setPadding(PetUi.dp(this@SpeechSettingsActivity, 2), PetUi.dp(this@SpeechSettingsActivity, 10), PetUi.dp(this@SpeechSettingsActivity, 2), 0)
+            setPadding(
+                PetUi.dp(this@SpeechSettingsActivity, 2),
+                PetUi.dp(this@SpeechSettingsActivity, 10),
+                PetUi.dp(this@SpeechSettingsActivity, 2),
+                0,
+            )
         }
         voiceCard.addView(styleExample)
         body.addView(voiceCard, PetUi.marginParams(this, 4))
@@ -124,26 +132,32 @@ class SpeechSettingsActivity : AppCompatActivity() {
         val maxHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(PetUi.text(this@SpeechSettingsActivity, "Одновременно", 15f, PetUi.TEXT, bold = true), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(
+                PetUi.text(this@SpeechSettingsActivity, "Одновременно", 15f, PetUi.TEXT, bold = true),
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+            )
             maxValue = PetUi.valuePill(this@SpeechSettingsActivity, "5")
             addView(maxValue)
         }
         densityCard.addView(maxHeader)
         maxSeek = SeekBar(this).apply { max = 4 }
         densityCard.addView(maxSeek)
-        densityCard.addView(PetUi.helper(this, "Если 1–5 баблов физически не помещаются, видимая страница уменьшается автоматически, остальные переходят на следующую."))
-        densityCard.addView(PetUi.navigationRow(this, "▱", "Стенд 1–5 баблов", "Проверить края экрана, landscape и разные масштабы") {
+        densityCard.addView(PetUi.helper(
+            this,
+            "Если выбранные реплики не помещаются, показывается столько, сколько реально входит на экран, а остальные переходят на следующую страницу.",
+        ))
+        densityCard.addView(PetUi.navigationRow(this, "▱", "Стенд", "1–5 реплик, края и поворот экрана") {
             startActivity(Intent(this@SpeechSettingsActivity, BubbleLabActivity::class.java))
         })
         body.addView(densityCard, PetUi.marginParams(this, 4))
 
         body.addView(PetUi.sectionTitle(this, "Автоматический показ"))
         val autoCard = PetUi.card(this)
-        val autoRow = PetUi.toggle(this, "Автоматические реплики", "Главный выключатель. Ручной тап по пету всё равно показывает актуальный контекст.")
+        val autoRow = PetUi.toggle(this, "Автоматические реплики", "Главный выключатель. Ручной тап по питомцу всё равно показывает актуальный контекст.")
         autoSwitch = PetUi.switchFrom(autoRow)
         val attentionRow = PetUi.toggle(this, "Требует внимания", "Ответ, разрешение, ошибка и потеря связи остаются до изменения ситуации.")
         attentionSwitch = PetUi.switchFrom(attentionRow)
-        val chatRow = PetUi.toggle(this, "Обычные сообщения ChatGPT", "Короткие transient-реплики, не смешиваются с состояниями Codex-задач.")
+        val chatRow = PetUi.toggle(this, "Сообщения ChatGPT", "Короткие временные реплики не смешиваются с состояниями задач Codex.")
         chatSwitch = PetUi.switchFrom(chatRow)
         val completionRow = PetUi.toggle(this, "Успешное завершение", "Результат показывается кратко; анимация успеха проигрывается один раз.")
         completionSwitch = PetUi.switchFrom(completionRow)
@@ -160,8 +174,11 @@ class SpeechSettingsActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(PetUi.dp(this@SpeechSettingsActivity, 2), PetUi.dp(this@SpeechSettingsActivity, 12), 0, 0)
-            addView(PetUi.text(this@SpeechSettingsActivity, "Результат держать", 14.5f, PetUi.TEXT, bold = true), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            completionValue = PetUi.valuePill(this@SpeechSettingsActivity, "5 сек")
+            addView(
+                PetUi.text(this@SpeechSettingsActivity, "Время результата", 14.5f, PetUi.TEXT, bold = true),
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            completionValue = PetUi.valuePill(this@SpeechSettingsActivity, "5 с")
             addView(completionValue)
         }
         autoCard.addView(durationHeader)
@@ -195,7 +212,9 @@ class SpeechSettingsActivity : AppCompatActivity() {
                 bubbleScaleValue.text = "${"%.2f".format(scale)}×"
                 renderBubblePreview(scale)
             }
+
             override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+
             override fun onStopTrackingTouch(seekBar: SeekBar) {
                 lifecycleScope.launch { AppGraph.settings.setBubbleScale(scaleFromProgress(seekBar.progress)) }
             }
@@ -204,16 +223,20 @@ class SpeechSettingsActivity : AppCompatActivity() {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                 if (fromUser) maxValue.text = (progress + 1).toString()
             }
+
             override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+
             override fun onStopTrackingTouch(seekBar: SeekBar) {
                 lifecycleScope.launch { AppGraph.settings.setMaxVisibleBubbles(seekBar.progress + 1) }
             }
         })
         completionSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                if (fromUser) completionValue.text = "$progress сек"
+                if (fromUser) completionValue.text = "$progress с"
             }
+
             override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+
             override fun onStopTrackingTouch(seekBar: SeekBar) {
                 lifecycleScope.launch { AppGraph.settings.setCompletedVisibleSeconds(seekBar.progress) }
             }
@@ -244,15 +267,15 @@ class SpeechSettingsActivity : AppCompatActivity() {
                         maxSeek.progress = settings.maxVisibleBubbles - 1
                         maxValue.text = settings.maxVisibleBubbles.toString()
                         completionSeek.progress = settings.completedVisibleSeconds
-                        completionValue.text = "${settings.completedVisibleSeconds} сек"
+                        completionValue.text = "${settings.completedVisibleSeconds} с"
                         autoSwitch.isChecked = settings.autoTaskBubblesEnabled
                         attentionSwitch.isChecked = settings.attentionBubblesEnabled
                         chatSwitch.isChecked = settings.chatMessageBubblesEnabled
                         completionSwitch.isChecked = settings.completionBubblesEnabled
                         styleExample.text = if (settings.speechStyle == SpeechStyle.FRIENDLY) {
-                            "«Тут нужен ты: выбери вариант» · фактический payload уведомления сохраняется."
+                            "«Тут нужен ты: выбери вариант» · смысл и фактический текст уведомления сохраняются."
                         } else {
-                            "«Choose an option» · показывается исходный notification-текст."
+                            "«Choose an option» · показывается исходный текст уведомления."
                         }
                         binding = false
                         renderBubblePreview(settings.bubbleScale)
@@ -305,7 +328,10 @@ class SpeechSettingsActivity : AppCompatActivity() {
                     (previewStage.width - previewBubble.width - PetUi.dp(this, 8)).coerceAtLeast(0).toFloat(),
                 )
                 previewBubble.y = (previewPet.y + petSize / 2f - previewBubble.height / 2f)
-                    .coerceIn(PetUi.dp(this, 8).toFloat(), (previewStage.height - previewBubble.height - PetUi.dp(this, 8)).coerceAtLeast(0).toFloat())
+                    .coerceIn(
+                        PetUi.dp(this, 8).toFloat(),
+                        (previewStage.height - previewBubble.height - PetUi.dp(this, 8)).coerceAtLeast(0).toFloat(),
+                    )
             }
         }
     }
