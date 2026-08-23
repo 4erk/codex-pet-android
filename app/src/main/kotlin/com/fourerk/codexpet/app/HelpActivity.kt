@@ -2,8 +2,6 @@ package com.fourerk.codexpet.app
 
 import android.content.Intent
 import android.os.Bundle
-import android.view.View
-import android.widget.LinearLayout
 import android.widget.ScrollView
 import androidx.appcompat.app.AppCompatActivity
 import com.fourerk.codexpet.BuildConfig
@@ -16,50 +14,66 @@ class HelpActivity : AppCompatActivity() {
         setContentView(buildContent())
     }
 
-    private fun buildContent(): View {
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(PetUi.dp(this@HelpActivity, 18), PetUi.dp(this@HelpActivity, 20), PetUi.dp(this@HelpActivity, 18), PetUi.dp(this@HelpActivity, 36))
-            setBackgroundColor(PetUi.BACKGROUND)
-        }
-        body.addView(PetUi.text(this, "Помощь", 28f, PetUi.TEXT, bold = true))
-        body.addView(PetUi.text(this, "Короткие инструкции для обычной работы; технические инструменты спрятаны ниже.", 14f, PetUi.MUTED))
+    private fun buildContent(): android.view.View {
+        val body = PetUi.page(
+            this,
+            "Помощь",
+            "Быстрые маршруты для восстановления работы и проверки конкретного слоя.",
+        )
 
         body.addView(PetUi.card(this, "Как начать").apply {
             addView(PetUi.text(
                 this@HelpActivity,
-                "1. Дайте доступ к уведомлениям и overlay.\n2. Оставьте уведомления ChatGPT включёнными, а системные bubbles при желании выключите.\n3. Запустите Codex Pet с главной.\n4. Нажимайте на реплики, чтобы открыть именно связанный чат/задачу, когда ChatGPT передал точный PendingIntent.",
+                "1. Разрешите чтение уведомлений и overlay.\n2. Оставьте обычные notifications ChatGPT включёнными.\n3. Запустите Codex Pet.\n4. Тап по реплике использует точный PendingIntent, если ChatGPT его передал.",
                 13f,
                 PetUi.MUTED,
             ))
         }, PetUi.marginParams(this, 16))
 
-        body.addView(PetUi.card(this, "Если что-то не обновляется").apply {
+        body.addView(PetUi.card(this, "Если перестало обновляться").apply {
             addView(PetUi.text(
                 this@HelpActivity,
-                "Откройте «Подключение» и нажмите «Пересинхронизировать». Если listener не подключён — используйте «Переподключить listener». На HONOR дополнительно разрешите фоновую работу Codex Pet.",
+                "Listener теперь восстанавливается сам: проверяет heartbeat, activeNotifications и после повторных ошибок делает controlled rebind. Если нужно ускорить проверку — используйте действия ниже.",
                 13f,
                 PetUi.MUTED,
             ))
-            addView(PetUi.action(this@HelpActivity, "Пересинхронизировать") {
+            addView(PetUi.primaryAction(this@HelpActivity, "Проверить activeNotifications") {
                 ChatGptNotificationListener.refresh(this@HelpActivity)
+            })
+            addView(PetUi.action(this@HelpActivity, "Перезапустить listener") {
+                ChatGptNotificationListener.restart(this@HelpActivity)
+            })
+            addView(PetUi.navigationRow(this@HelpActivity, "↗", "Открыть подключение", "Heartbeat, rebind и настройки MagicOS") {
+                startActivity(Intent(this@HelpActivity, IntegrationActivity::class.java))
             })
         }, PetUi.marginParams(this))
 
-        body.addView(PetUi.card(this, "Приватность").apply {
+        body.addView(PetUi.card(this, "Проверить внешний вид").apply {
+            addView(PetUi.navigationRow(this@HelpActivity, "◫", "Стенд 1–5 баблов", "Без реальных уведомлений") {
+                startActivity(Intent(this@HelpActivity, BubbleLabActivity::class.java))
+            })
+            addView(PetUi.navigationRow(this@HelpActivity, "✦", "Все анимации", "Триггеры и ручной тест") {
+                startActivity(Intent(this@HelpActivity, AnimationSettingsActivity::class.java))
+            })
+        }, PetUi.marginParams(this))
+
+        body.addView(PetUi.card(this, "Обновления и сеть").apply {
             addView(PetUi.text(
                 this@HelpActivity,
-                "Codex Pet работает локально и не запрашивает INTERNET. Для интерфейса используются данные публичных Android notifications; текст переписки не сохраняется на диск как история.",
+                "Основная работа пета остаётся локальной: notification-тексты не отправляются на сервер. INTERNET используется только для проверки публичного GitHub Releases API и скачивания stable APK. Перед установкой проверяются GitHub SHA-256, package name и сертификат подписи.",
                 13f,
                 PetUi.MUTED,
             ))
+            addView(PetUi.navigationRow(this@HelpActivity, "⇩", "Обновления", "Stable channel и параметры автозагрузки") {
+                startActivity(Intent(this@HelpActivity, UpdatesActivity::class.java))
+            })
         }, PetUi.marginParams(this))
 
-        body.addView(PetUi.sectionTitle(this, "РАСШИРЕННОЕ"))
+        body.addView(PetUi.sectionTitle(this, "Расширенное"))
         body.addView(PetUi.card(this, "Диагностика").apply {
             addView(PetUi.text(
                 this@HelpActivity,
-                "Нужна только при разборе проблем с конкретной версией ChatGPT/Android. В обычные настройки питомца и long-press меню она больше не встроена.",
+                "Для разбора конкретной версии ChatGPT/Android. Экспорт остаётся санитизированным; release-build не экспортирует полный текст уведомлений.",
                 12f,
                 PetUi.MUTED,
             ))
