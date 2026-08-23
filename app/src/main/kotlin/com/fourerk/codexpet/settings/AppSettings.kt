@@ -22,6 +22,7 @@ data class AppSettings(
     val animationsEnabled: Boolean = true,
     val animationSpeed: Float = 1f,
     val petSizeDp: Int = 72,
+    val bubbleScale: Float = 1f,
     val portraitX: Int = -1,
     val portraitY: Int = -1,
     val landscapeX: Int = -1,
