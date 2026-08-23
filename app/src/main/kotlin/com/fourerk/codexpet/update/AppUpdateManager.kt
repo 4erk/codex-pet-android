@@ -106,7 +106,7 @@ class AppUpdateManager(
     }
 
     fun openReleasePage(): Boolean {
-        val url = availableRelease?.htmlUrl ?: return false
+        val url = availableRelease?.htmlUrl ?: RELEASES_PAGE
         return runCatching {
             context.startActivity(
                 Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -128,6 +128,7 @@ class AppUpdateManager(
     private suspend fun performCheck(force: Boolean) {
         if (!force && !settings.settings.value.autoUpdateEnabled) return
         val now = System.currentTimeMillis()
+        settings.setLastUpdateCheckAt(now)
         mutableState.value = mutableState.value.copy(
             phase = UpdatePhase.CHECKING,
             progressPercent = null,
@@ -142,7 +143,6 @@ class AppUpdateManager(
                 )
             }
             .onSuccess { release ->
-                settings.setLastUpdateCheckAt(now)
                 if (!SemanticVersion.isNewer(release.version, BuildConfig.VERSION_NAME)) {
                     availableRelease = null
                     downloadedFile = null
@@ -187,6 +187,9 @@ class AppUpdateManager(
                 val text = reader.readText()
                 require(text.length <= MAX_RELEASE_JSON_CHARS) { "GitHub response is too large" }
                 JSONObject(text)
+            }
+            require(!json.optBoolean("draft", false) && !json.optBoolean("prerelease", false)) {
+                "Latest release is not stable"
             }
             val assetsJson = json.getJSONArray("assets")
             val assets = buildList {
@@ -360,8 +363,8 @@ class AppUpdateManager(
     }
 
     private fun canAutoDownload(): Boolean {
-        val settings = settings.settings.value
-        if (!settings.updateWifiOnly) return true
+        val currentSettings = settings.settings.value
+        if (!currentSettings.updateWifiOnly) return true
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
         return connectivity.activeNetwork != null && !connectivity.isActiveNetworkMetered
     }
@@ -403,6 +406,7 @@ class AppUpdateManager(
         const val MAX_RELEASE_JSON_CHARS = 1_000_000
         const val MAX_APK_BYTES = 120L * 1024L * 1024L
         const val LATEST_RELEASE_API = "https://api.github.com/repos/4erk/codex-pet-android/releases/latest"
+        const val RELEASES_PAGE = "https://github.com/4erk/codex-pet-android/releases/latest"
         const val UPDATE_CHANNEL_ID = "codex_pet_updates"
         const val UPDATE_NOTIFICATION_ID = 5101
     }
