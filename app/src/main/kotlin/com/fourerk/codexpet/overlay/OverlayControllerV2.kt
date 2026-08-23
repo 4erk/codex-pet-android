@@ -52,6 +52,7 @@ import com.fourerk.codexpet.task.TaskKind
 import com.fourerk.codexpet.task.TaskStatus
 import com.fourerk.codexpet.task.TaskTransition
 import com.fourerk.codexpet.task.hasExactOpenTarget
+import com.fourerk.codexpet.task.isCodexTask
 import com.fourerk.codexpet.task.isDisplayTask
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -60,7 +61,7 @@ import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
-/** Product overlay controller: stable windows, adaptive speech, and deterministic animation priority. */
+/** Product UI controller used by the stable overlay. The old controller is retained for rollback. */
 class OverlayControllerV2(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -104,7 +105,7 @@ class OverlayControllerV2(
     private var snapAnimator: ValueAnimator? = null
 
     private val speechRotationRunnable = Runnable {
-        if (!speechShown || speechItems.size <= currentPageLimit()) return@Runnable
+        if (!speechShown || speechItems.size <= renderedPageSize.coerceAtLeast(1)) return@Runnable
         advanceSpeechPage()
         renderSpeechWindows()
     }
@@ -269,7 +270,7 @@ class OverlayControllerV2(
                 renderState(PetAnimationState.WAITING, force = true)
             transition.toCue == TaskAnimationCue.DISCONNECTED ||
                 transition.toCue == TaskAnimationCue.FAILED ||
-                transition.to == TaskStatus.ERROR -> renderState(
+                transition.to == TaskStatus.ERROR && transition.toCue != TaskAnimationCue.RECONNECTING -> renderState(
                     if (dominantState == PetAnimationState.WAITING) PetAnimationState.WAITING else PetAnimationState.FAILED,
                     force = true,
                 )
@@ -308,7 +309,7 @@ class OverlayControllerV2(
             showSpeech(manual = !settings.autoTaskBubblesEnabled)
             return
         }
-        if (speechItems.size > currentPageLimit()) {
+        if (speechItems.size > renderedPageSize.coerceAtLeast(1)) {
             advanceSpeechPage()
             renderSpeechWindows()
         }
@@ -521,7 +522,6 @@ class OverlayControllerV2(
 
         val page = currentPageItems()
         if (page.isEmpty()) return
-        renderedPageSize = page.size
         val metrics = speechMetrics(page)
         val safe = safeBounds()
         val petLayout = petParams ?: return
@@ -540,7 +540,15 @@ class OverlayControllerV2(
             )
         }
         val minimumHeight = dp((48f * bubbleScale).roundToInt().coerceIn(40, 72))
-        val heights = prepared.map { it.root.measuredHeight.coerceAtLeast(minimumHeight) }
+        val allHeights = prepared.map { it.root.measuredHeight.coerceAtLeast(minimumHeight) }
+        val fitCount = SpeechBubblePageFit.fittingCount(
+            heights = allHeights,
+            gap = gap,
+            availableHeight = safe.bottom - safe.top,
+        ).coerceIn(1, prepared.size)
+        val visiblePrepared = prepared.take(fitCount)
+        val heights = allHeights.take(fitCount)
+        renderedPageSize = fitCount
         val placements = SpeechBubblePlacement.calculate(
             safe = safe.toOverlayBounds(),
             petX = petLayout.x,
@@ -552,12 +560,12 @@ class OverlayControllerV2(
             gap = gap,
         )
 
-        prepared.zip(placements).forEach { (bubble, placement) ->
+        visiblePrepared.zip(placements).forEach { (bubble, placement) ->
             configureTail(bubble, placement.anchor.toTailEdge(), placement.tailOffset)
             addSpeechWindow(bubble, placement.x, placement.y)
         }
 
-        if (speechItems.size > currentPageLimit()) {
+        if (speechItems.size > renderedPageSize) {
             handler.postDelayed(speechRotationRunnable, SPEECH_PAGE_ROTATION_MS)
         }
     }
@@ -793,13 +801,19 @@ class OverlayControllerV2(
             })
         }
         addAction("Открыть текущий чат") { openBestCurrent() }
+        addAction("Настройки реплик") {
+            context.startActivity(
+                Intent(context, com.fourerk.codexpet.app.SpeechSettingsActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
         addAction("Настройки Codex Pet") {
             context.startActivity(Intent(context, HomeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
         addAction(context.getString(R.string.hide_pet), ::hidePet)
         val width = dp(230)
         val params = baseParams(width, WindowManager.LayoutParams.WRAP_CONTENT)
-        val placement = menuPlacement(width, dp(170))
+        val placement = menuPlacement(width, dp(215))
         params.x = placement.first
         params.y = placement.second
         runCatching { windowManager.addView(container, params) }
@@ -1048,7 +1062,7 @@ class OverlayControllerV2(
     private fun repositionMenu() {
         val view = menuView ?: return
         val params = menuParams ?: return
-        val placement = menuPlacement(params.width, view.measuredHeight.takeIf { it > 0 } ?: dp(170))
+        val placement = menuPlacement(params.width, view.measuredHeight.takeIf { it > 0 } ?: dp(215))
         params.x = placement.first
         params.y = placement.second
         runCatching { windowManager.updateViewLayout(view, params) }
