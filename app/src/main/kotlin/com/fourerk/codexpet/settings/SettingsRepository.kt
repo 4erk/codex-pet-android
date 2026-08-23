@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import java.io.IOException
 
 private val Context.codexPetDataStore by preferencesDataStore(name = "codex_pet_settings")
@@ -32,6 +33,7 @@ class SettingsRepository(
         val autoStart = booleanPreferencesKey("auto_start")
         val snapEnabled = booleanPreferencesKey("snap_enabled")
         val animationsEnabled = booleanPreferencesKey("animations_enabled")
+        val animationEngineVersion = intPreferencesKey("animation_engine_version")
         val animationSpeed = floatPreferencesKey("animation_speed")
         val petSizeDp = intPreferencesKey("pet_size_dp")
         val portraitX = intPreferencesKey("portrait_x")
@@ -39,7 +41,6 @@ class SettingsRepository(
         val landscapeX = intPreferencesKey("landscape_x")
         val landscapeY = intPreferencesKey("landscape_y")
         val completedVisibleSeconds = intPreferencesKey("completed_visible_seconds")
-        val panelPinned = booleanPreferencesKey("panel_pinned")
         val autoTaskBubblesEnabled = booleanPreferencesKey("auto_task_bubbles_enabled")
         val attentionBubblesEnabled = booleanPreferencesKey("attention_bubbles_enabled")
         val chatMessageBubblesEnabled = booleanPreferencesKey("chat_message_bubbles_enabled")
@@ -60,6 +61,18 @@ class SettingsRepository(
     val settings: StateFlow<AppSettings> = updates
         .stateIn(scope, SharingStarted.Eagerly, AppSettings())
 
+    init {
+        scope.launch {
+            context.codexPetDataStore.edit { preferences ->
+                if ((preferences[Keys.animationEngineVersion] ?: 0) < CURRENT_ANIMATION_ENGINE_VERSION) {
+                    // Earlier builds used transform motion; v2 uses only source sprite frames.
+                    preferences[Keys.animationsEnabled] = true
+                    preferences[Keys.animationEngineVersion] = CURRENT_ANIMATION_ENGINE_VERSION
+                }
+            }
+        }
+    }
+
     suspend fun readCurrent(): AppSettings = updates.first()
 
     suspend fun setSourcePackage(value: String) = update(Keys.sourcePackage, sanitizePackage(value))
@@ -71,7 +84,6 @@ class SettingsRepository(
     suspend fun setAnimationSpeed(value: Float) = update(Keys.animationSpeed, value.coerceIn(0.5f, 2f))
     suspend fun setPetSizeDp(value: Int) = update(Keys.petSizeDp, value.coerceIn(48, 160))
     suspend fun setCompletedVisibleSeconds(value: Int) = update(Keys.completedVisibleSeconds, value.coerceIn(0, 30))
-    suspend fun setPanelPinned(value: Boolean) = update(Keys.panelPinned, value)
     suspend fun setAutoTaskBubblesEnabled(value: Boolean) = update(Keys.autoTaskBubblesEnabled, value)
     suspend fun setAttentionBubblesEnabled(value: Boolean) = update(Keys.attentionBubblesEnabled, value)
     suspend fun setChatMessageBubblesEnabled(value: Boolean) = update(Keys.chatMessageBubblesEnabled, value)
@@ -126,7 +138,6 @@ class SettingsRepository(
         landscapeX = preferences[Keys.landscapeX] ?: -1,
         landscapeY = preferences[Keys.landscapeY] ?: -1,
         completedVisibleSeconds = preferences[Keys.completedVisibleSeconds] ?: 5,
-        panelPinned = preferences[Keys.panelPinned] ?: false,
         autoTaskBubblesEnabled = preferences[Keys.autoTaskBubblesEnabled] ?: true,
         attentionBubblesEnabled = preferences[Keys.attentionBubblesEnabled] ?: true,
         chatMessageBubblesEnabled = preferences[Keys.chatMessageBubblesEnabled] ?: true,
@@ -146,6 +157,7 @@ class SettingsRepository(
     }
 
     private companion object {
+        const val CURRENT_ANIMATION_ENGINE_VERSION = 2
         val PACKAGE_PATTERN = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
     }
 }

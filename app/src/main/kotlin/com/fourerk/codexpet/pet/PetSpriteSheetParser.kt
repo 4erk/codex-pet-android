@@ -19,6 +19,7 @@ data class ParsedPetSpriteSheet(
 /** Parser for the documented ChatGPT v1/v2 pet atlas, including lossless 2x packs. */
 object PetSpriteSheetParser {
     fun hasSupportedGeometry(bitmap: Bitmap): Boolean = geometry(bitmap) != null
+    fun hasSupportedGeometry(width: Int, height: Int): Boolean = geometry(width, height) != null
 
     fun parse(bitmap: Bitmap): Result<ParsedPetSpriteSheet> = runCatching {
         val geometry = requireNotNull(geometry(bitmap)) {
@@ -62,13 +63,15 @@ object PetSpriteSheetParser {
         )
     }
 
-    private fun geometry(bitmap: Bitmap): Geometry? {
-        if (bitmap.width % COLUMN_COUNT != 0) return null
-        val cellWidth = bitmap.width / COLUMN_COUNT
+    private fun geometry(bitmap: Bitmap): Geometry? = geometry(bitmap.width, bitmap.height)
+
+    private fun geometry(width: Int, height: Int): Geometry? {
+        if (width % COLUMN_COUNT != 0) return null
+        val cellWidth = width / COLUMN_COUNT
         val scale = cellWidth / BASE_CELL_WIDTH
         if (scale !in 1..MAX_SCALE || cellWidth != BASE_CELL_WIDTH * scale) return null
         val cellHeight = BASE_CELL_HEIGHT * scale
-        val version = when (bitmap.height) {
+        val version = when (height) {
             cellHeight * V1_ROWS -> 1
             cellHeight * V2_ROWS -> 2
             else -> return null
@@ -113,7 +116,7 @@ object PetSpriteSheetParser {
     )
 
     private val ROWS = listOf(
-        RowDefinition(PetAnimationState.IDLE, 6, listOf(280, 110, 110, 140, 140, 320)),
+        RowDefinition(PetAnimationState.IDLE, 7, listOf(280, 110, 110, 140, 140, 140, 320)),
         RowDefinition(PetAnimationState.RUNNING_RIGHT, 8, sevenThen(120, 220)),
         RowDefinition(PetAnimationState.RUNNING_LEFT, 8, sevenThen(120, 220)),
         RowDefinition(PetAnimationState.WAVING, 4, listOf(140, 140, 140, 280)),

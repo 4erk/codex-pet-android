@@ -35,9 +35,9 @@ jobs:
       - name: Test, lint and assemble
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 
-      - name: Upload Phase 0 APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: codex-pet-phase0-debug
+          name: codex-pet-android-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

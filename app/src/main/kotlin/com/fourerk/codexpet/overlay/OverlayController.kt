@@ -5,7 +5,6 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
 import android.content.Intent
-import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -17,7 +16,6 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
-import android.text.format.DateUtils
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -26,39 +24,36 @@ import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.ScrollView
-import android.widget.Space
 import android.widget.TextView
 import androidx.core.graphics.drawable.toDrawable
 import com.fourerk.codexpet.R
 import com.fourerk.codexpet.app.AppGraph
 import com.fourerk.codexpet.app.DiagnosticsActivity
 import com.fourerk.codexpet.app.MainActivity
-import com.fourerk.codexpet.pet.PetVisual
 import com.fourerk.codexpet.pet.PetAnimationState
 import com.fourerk.codexpet.pet.PetFrameSequence
+import com.fourerk.codexpet.pet.PetVisual
 import com.fourerk.codexpet.settings.AppSettings
 import com.fourerk.codexpet.settings.LongPressAction
 import com.fourerk.codexpet.system.TaskOpener
 import com.fourerk.codexpet.task.CodexTask
+import com.fourerk.codexpet.task.PetSpeechItem
+import com.fourerk.codexpet.task.PetSpeechPolicy
+import com.fourerk.codexpet.task.PetSpeechPriority
+import com.fourerk.codexpet.task.PetSpeechSelector
+import com.fourerk.codexpet.task.TaskAnimationCue
 import com.fourerk.codexpet.task.TaskKind
 import com.fourerk.codexpet.task.TaskStatus
 import com.fourerk.codexpet.task.TaskTransition
-import com.fourerk.codexpet.task.TaskAnimationCue
-import com.fourerk.codexpet.task.isDisplayTask
 import com.fourerk.codexpet.task.isCodexTask
+import com.fourerk.codexpet.task.isDisplayTask
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import java.time.Duration
-import java.time.Instant
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 class OverlayController(
@@ -68,17 +63,25 @@ class OverlayController(
     private val windowManager = context.getSystemService(WindowManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+
     private var settings = AppSettings()
     private var tasks: List<CodexTask> = emptyList()
     private var pet: PetVisual? = null
+
     private var petRoot: FrameLayout? = null
     private var petImage: ImageView? = null
     private var petParams: WindowManager.LayoutParams? = null
-    private var panelView: View? = null
-    private var panelParams: WindowManager.LayoutParams? = null
-    private var panelUi: PanelUi? = null
+
+    private var speechView: FrameLayout? = null
+    private var speechParams: WindowManager.LayoutParams? = null
+    private var speechUi: SpeechUi? = null
+    private var speechItems: List<PetSpeechItem> = emptyList()
+    private var speechIndex = 0
+    private var speechManualMode = false
+    private var autoSpeechSuppressed = false
     private var menuView: View? = null
     private var menuParams: WindowManager.LayoutParams? = null
+
     private var displayedState: PetAnimationState? = null
     private var displayedSequence: PetFrameSequence? = null
     private var transientRunnable: Runnable? = null
@@ -89,6 +92,16 @@ class OverlayController(
     private var downWindowY = 0
     private var moved = false
     private var longPressTriggered = false
+
+    private val speechRotationRunnable = Runnable {
+        if (!isSpeechVisible() || speechItems.size < 2) return@Runnable
+        speechIndex = (speechIndex + 1) % speechItems.size
+        renderSpeech()
+    }
+
+    private val speechExpirationRunnable = Runnable {
+        refreshSpeechItems(allowAutoShow = false, contentChanged = false)
+    }
 
     private val longPressRunnable = Runnable {
         if (moved || petRoot == null) return@Runnable
@@ -109,7 +122,7 @@ class OverlayController(
             elevation = 0f
             scaleType = ImageView.ScaleType.FIT_CENTER
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-            contentDescription = "Codex Pet"
+            contentDescription = context.getString(R.string.app_name)
         }
         val root = FrameLayout(context).apply {
             background = null
@@ -129,18 +142,17 @@ class OverlayController(
                 petImage = image
                 petParams = params
                 renderTaskAnimation(force = true)
-                if (settings.panelPinned && pet != null) root.post(::showPanel)
+                refreshSpeechItems(allowAutoShow = true, contentChanged = true)
             }
     }
 
     fun destroy() {
         handler.removeCallbacksAndMessages(null)
-        transientRunnable?.let(handler::removeCallbacks)
         transientRunnable = null
         displayedState = null
         displayedSequence = null
         stopNativeAnimation()
-        removePanel()
+        removeSpeechWindow()
         removeMenu()
         petRoot?.let { runCatching { windowManager.removeViewImmediate(it) } }
         petRoot = null
@@ -149,14 +161,7 @@ class OverlayController(
     }
 
     fun applySettings(newSettings: AppSettings) {
-        val oldSize = settings.petSizeDp
-        val oldAnimations = settings.animationsEnabled
-        val oldSpeed = settings.animationSpeed
-        val oldPanelPinned = settings.panelPinned
-        val oldPetVisible = settings.petVisible
-        val oldAutoTaskBubbles = settings.autoTaskBubblesEnabled
-        val oldChatMessages = settings.chatMessageBubblesEnabled
-        val oldCompletedVisibleSeconds = settings.completedVisibleSeconds
+        val old = settings
         settings = newSettings
         val root = petRoot ?: return
         root.visibility = if (newSettings.overlayEnabled && newSettings.petVisible && pet != null) {
@@ -165,12 +170,14 @@ class OverlayController(
             View.INVISIBLE
         }
         if (!newSettings.petVisible) {
-            removePanel()
+            hideSpeech(suppressAutomatic = false)
             removeMenu()
-        } else if (!oldPetVisible && newSettings.petVisible && pet != null) {
-            if (newSettings.panelPinned) showPanel() else maybeShowCurrentPanel()
+        } else if (!old.petVisible && newSettings.petVisible && pet != null) {
+            autoSpeechSuppressed = false
+            refreshSpeechItems(allowAutoShow = true, contentChanged = true)
         }
-        if (oldSize != newSettings.petSizeDp) {
+
+        if (old.petSizeDp != newSettings.petSizeDp) {
             val size = dp(newSettings.petSizeDp)
             petParams?.let { params ->
                 params.width = size
@@ -178,31 +185,36 @@ class OverlayController(
                 clampPosition(params, size)
                 updatePetLayout()
             }
-            repositionPanel()
+            updateSpeechGeometry()
             repositionMenu()
         }
-        if (oldAnimations != newSettings.animationsEnabled || oldSpeed != newSettings.animationSpeed) {
+        if (old.animationsEnabled != newSettings.animationsEnabled ||
+            old.animationSpeed != newSettings.animationSpeed
+        ) {
             renderTaskAnimation(force = true)
         }
-        if (oldPanelPinned != newSettings.panelPinned) {
-            updatePinState()
-            if (newSettings.panelPinned && panelView == null && pet != null) showPanel()
-        }
-        if (oldAutoTaskBubbles && !newSettings.autoTaskBubblesEnabled && !newSettings.panelPinned) {
-            removePanel()
-        } else if (!oldAutoTaskBubbles && newSettings.autoTaskBubblesEnabled && panelView == null) {
-            maybeShowCurrentPanel()
-        }
-        if (panelView != null &&
-            (oldChatMessages != newSettings.chatMessageBubblesEnabled ||
-                oldCompletedVisibleSeconds != newSettings.completedVisibleSeconds)
-        ) {
-            renderPanel()
+
+        val speechSettingsChanged = old.autoTaskBubblesEnabled != newSettings.autoTaskBubblesEnabled ||
+            old.attentionBubblesEnabled != newSettings.attentionBubblesEnabled ||
+            old.chatMessageBubblesEnabled != newSettings.chatMessageBubblesEnabled ||
+            old.completionBubblesEnabled != newSettings.completionBubblesEnabled ||
+            old.completedVisibleSeconds != newSettings.completedVisibleSeconds
+        if (speechSettingsChanged) {
+            if (!newSettings.autoTaskBubblesEnabled) {
+                speechManualMode = false
+                autoSpeechSuppressed = true
+                hideSpeech(suppressAutomatic = false)
+                refreshSpeechItems(allowAutoShow = false, contentChanged = false)
+            } else {
+                autoSpeechSuppressed = false
+                refreshSpeechItems(allowAutoShow = true, contentChanged = true)
+            }
         }
     }
 
     fun setPet(newPet: PetVisual?) {
         if (pet === newPet) return
+        val oldHash = pet?.hash
         pet = newPet
         petRoot?.visibility = if (newPet != null && settings.overlayEnabled && settings.petVisible) {
             View.VISIBLE
@@ -210,50 +222,95 @@ class OverlayController(
             View.INVISIBLE
         }
         renderTaskAnimation(force = true)
-        if (panelView == null && newPet != null) {
-            if (settings.panelPinned) showPanel() else maybeShowCurrentPanel()
+        if (newPet == null) {
+            hideSpeech(suppressAutomatic = false)
+        } else {
+            refreshSpeechItems(allowAutoShow = true, contentChanged = oldHash != newPet.hash)
+            if (oldHash != newPet.hash && newPet.frameSequences.isNotEmpty()) {
+                petImage?.post { previewAnimation() }
+            }
         }
     }
 
     fun setTasks(newTasks: List<CodexTask>) {
         if (tasks == newTasks) return
-        val previousTasks = tasks
+        val previousTokens = speechItems.map(::speechToken).toSet()
         tasks = newTasks
-        if (panelView != null) renderPanel()
-        else if (settings.panelPinned && pet != null) showPanel()
-        else if (shouldAutoShowPanel(previousTasks, newTasks)) showPanel()
-        renderTaskAnimation()
+        val prospective = selectSpeechItems(manual = speechManualMode && isSpeechVisible())
+        val contentChanged = prospective.any { speechToken(it) !in previousTokens }
+        refreshSpeechItems(allowAutoShow = true, contentChanged = contentChanged)
+        val dominantState = taskAnimationState()
+        if (dominantState == PetAnimationState.WAITING || dominantState == PetAnimationState.FAILED) {
+            // Attention states always interrupt lower-priority one-shot reactions.
+            renderState(dominantState, force = true)
+        } else {
+            renderTaskAnimation()
+        }
     }
 
     fun onTaskTransition(transition: TaskTransition) {
-        val persistentState = taskAnimationState()
+        val dominantState = taskAnimationState()
         when {
-            transition.toCue == TaskAnimationCue.DISCONNECTED ||
-                transition.toCue == TaskAnimationCue.FAILED || transition.to == TaskStatus.ERROR ->
-                renderState(PetAnimationState.FAILED, force = true)
-            transition.toCue == TaskAnimationCue.RECONNECTING ||
-                transition.toCue == TaskAnimationCue.WAITING_FOR_INPUT ->
+            transition.toCue == TaskAnimationCue.WAITING_FOR_INPUT ->
                 renderState(PetAnimationState.WAITING, force = true)
-            persistentState == PetAnimationState.FAILED || persistentState == PetAnimationState.WAITING ->
-                renderState(persistentState, force = true)
-            (transition.toCue == TaskAnimationCue.COMPLETED || transition.to == TaskStatus.COMPLETED) &&
-                settings.completionBubblesEnabled ->
+            transition.toCue == TaskAnimationCue.DISCONNECTED ||
+                transition.toCue == TaskAnimationCue.FAILED ||
+                transition.to == TaskStatus.ERROR -> renderState(
+                    if (dominantState == PetAnimationState.WAITING) {
+                        PetAnimationState.WAITING
+                    } else {
+                        PetAnimationState.FAILED
+                    },
+                    force = true,
+                )
+            transition.toCue == TaskAnimationCue.RECONNECTING ->
+                renderState(PetAnimationState.WAITING, force = true)
+            dominantState == PetAnimationState.WAITING || dominantState == PetAnimationState.FAILED ->
+                renderState(dominantState, force = true)
+            transition.toCue == TaskAnimationCue.COMPLETED || transition.to == TaskStatus.COMPLETED ->
                 playOneShot(PetAnimationState.JUMPING)
-            transition.liveNotification && transition.kind == TaskKind.CHAT_MESSAGE &&
-                settings.chatMessageBubblesEnabled ->
+            transition.liveNotification && transition.kind == TaskKind.CHAT_MESSAGE ->
                 playOneShot(PetAnimationState.WAVING)
             else -> renderTaskAnimation()
         }
     }
 
     fun onConfigurationChanged() {
-        removePanel()
         removeMenu()
         val params = petParams ?: return
         val size = dp(settings.petSizeDp)
         applySavedPosition(params, size)
         updatePetLayout()
-        if (settings.panelPinned && pet != null) petRoot?.post(::showPanel)
+        updateSpeechGeometry()
+    }
+
+    fun showNextSpeech() {
+        if (!isSpeechVisible()) {
+            showSpeech(manual = !settings.autoTaskBubblesEnabled)
+            return
+        }
+        if (speechItems.size > 1) {
+            speechIndex = (speechIndex + 1) % speechItems.size
+            renderSpeech()
+        }
+    }
+
+    fun previewAnimation(): Boolean {
+        val available = pet?.frameSequences.orEmpty()
+        if (available.isEmpty() || !animationsAllowed()) return false
+        val first = if (available.containsKey(PetAnimationState.WAVING)) {
+            PetAnimationState.WAVING
+        } else {
+            PetAnimationState.JUMPING
+        }
+        playOneShot(first) {
+            if (first != PetAnimationState.JUMPING && available.containsKey(PetAnimationState.JUMPING)) {
+                playOneShot(PetAnimationState.JUMPING)
+            } else {
+                renderTaskAnimation(force = true)
+            }
+        }
+        return true
     }
 
     private fun onPetTouch(view: View, event: MotionEvent): Boolean {
@@ -275,7 +332,6 @@ class OverlayController(
                 if (!moved && hypot(dx.toDouble(), dy.toDouble()) > touchSlop.toDouble()) {
                     moved = true
                     handler.removeCallbacks(longPressRunnable)
-                    if (!settings.panelPinned) removePanel()
                     removeMenu()
                 }
                 if (moved) {
@@ -283,7 +339,7 @@ class OverlayController(
                     params.y = downWindowY + dy.roundToInt()
                     clampPosition(params, dp(settings.petSizeDp))
                     updatePetLayout()
-                    if (settings.panelPinned) repositionPanel()
+                    repositionSpeech()
                     renderState(
                         if (dx >= 0f) PetAnimationState.RUNNING_RIGHT else PetAnimationState.RUNNING_LEFT,
                     )
@@ -297,7 +353,7 @@ class OverlayController(
                     renderTaskAnimation(force = true)
                 } else if (!longPressTriggered) {
                     view.performClick()
-                    togglePanel()
+                    toggleSpeech()
                 }
                 return true
             }
@@ -311,285 +367,207 @@ class OverlayController(
         return false
     }
 
-    private fun togglePanel() {
-        if (panelView != null) closePanel(unpin = settings.panelPinned) else showPanel()
+    private fun toggleSpeech() {
+        if (isSpeechVisible()) {
+            hideSpeech(suppressAutomatic = true)
+        } else {
+            autoSpeechSuppressed = false
+            showSpeech(manual = true)
+            playGreeting()
+        }
     }
 
-    /** Adds the WindowManager view once. Notification updates mutate its children in place. */
-    private fun showPanel() {
-        if (panelView != null || petRoot == null || !settings.petVisible) return
+    private fun showSpeech(manual: Boolean) {
+        if (petRoot == null || pet == null || !settings.petVisible) return
         removeMenu()
+        speechManualMode = manual
+        speechItems = selectSpeechItems(manual)
+        speechIndex = speechIndex.coerceIn(0, (speechItems.size - 1).coerceAtLeast(0))
+        ensureSpeechWindow()
+        speechView?.visibility = View.VISIBLE
+        renderSpeech()
+    }
 
-        val bubble = SpeechBubbleDrawable(
-            color = PANEL_COLOR,
-            strokeColor = PANEL_STROKE_COLOR,
-            cornerRadiusPx = dp(24).toFloat(),
-            tailSizePx = dp(PANEL_TAIL_DP).toFloat(),
-            strokeWidthPx = dp(1).toFloat(),
-        )
+    private fun ensureSpeechWindow() {
+        if (speechView != null) return
+        val metrics = speechMetrics()
+        val bubble = newSpeechDrawable(metrics)
+        val title = label("", metrics.titleSp, Color.WHITE, bold = true).apply {
+            maxLines = 1
+            visibility = View.GONE
+        }
+        val body = label("", metrics.bodySp, SPEECH_TEXT_COLOR).apply {
+            maxLines = metrics.maxLines
+            ellipsize = TextUtils.TruncateAt.END
+            setLineSpacing(0f, 1.08f)
+        }
+        val dot = View(context)
+        val counter = label("", metrics.metaSp, MUTED_COLOR, bold = true).apply {
+            isSingleLine = true
+        }
+        val footer = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            visibility = View.GONE
+            addView(dot, LinearLayout.LayoutParams(dp(6), dp(6)).apply { marginEnd = dp(6) })
+            addView(counter)
+        }
+        val content = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(metrics.horizontalPadding, metrics.verticalPadding, metrics.horizontalPadding, metrics.verticalPadding)
+            addView(title, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            addView(body, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            addView(footer, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        }
         val root = FrameLayout(context).apply {
             background = bubble
             clipChildren = false
             clipToPadding = false
-            elevation = dp(6).toFloat()
-        }
-        val content = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-        }
-        root.addView(
-            content,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-            ),
-        )
-
-        val activeLabel = label("", 11f, ACTIVE_COLOR, bold = true).apply {
-            gravity = Gravity.CENTER
-            setPadding(dp(9), dp(5), dp(9), dp(5))
-            background = roundedBackground(0x2410A37F, 12f)
-            isSingleLine = true
-        }
-        val pinButton = iconButton(R.drawable.ic_pin, context.getString(R.string.pin_panel)) {
-            setPanelPinned(!settings.panelPinned)
-        }
-        val closeButton = iconButton(R.drawable.ic_close, context.getString(R.string.close_panel)) {
-            closePanel(unpin = settings.panelPinned)
-        }
-        val header = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(label(context.getString(R.string.panel_title), 18f, Color.WHITE, bold = true))
-            addView(Space(context), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(activeLabel)
-            addView(pinButton, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginStart = dp(6) })
-            addView(closeButton, LinearLayout.LayoutParams(dp(36), dp(36)))
-        }
-        val taskContainer = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(8), 0, dp(10))
-        }
-        val safe = safeBounds()
-        val maxTaskHeight = min(dp(420), ((safe.bottom - safe.top) * 0.55f).roundToInt())
-        val taskScroll = ScrollView(context).apply {
-            isFillViewport = false
-            isVerticalScrollBarEnabled = true
-            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-            addView(
-                taskContainer,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-        }
-        val openAll = label(context.getString(R.string.all_tasks), 13f, Color.WHITE, bold = true).apply {
-            gravity = Gravity.CENTER
-            setPadding(dp(12), dp(11), dp(12), dp(11))
-            background = roundedBackground(0xFF30353B.toInt(), 14f, PANEL_STROKE_COLOR)
+            elevation = dp(4).toFloat()
             isClickable = true
             isFocusable = true
+            contentDescription = context.getString(R.string.open_current_speech)
+            addView(content, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT)
             setOnClickListener {
-                TaskOpener.openBestAvailable(context, tasks, settings.sourcePackage)
-                if (!settings.panelPinned) removePanel()
+                val item = speechItems.getOrNull(speechIndex)
+                val opened = if (item != null) {
+                    TaskOpener.openTask(context, item.task, settings.sourcePackage)
+                } else {
+                    TaskOpener.openBestAvailable(context, tasks, settings.sourcePackage)
+                }
+                if (opened) {
+                    hideSpeech(suppressAutomatic = true)
+                } else {
+                    AppGraph.diagnostics.error("Unable to open ChatGPT PendingIntent or launcher")
+                }
             }
         }
-        content.addView(header)
-        content.addView(
-            label(context.getString(R.string.current_status), 11f, MUTED_COLOR, bold = true).apply {
-                letterSpacing = 0.08f
-                isAllCaps = true
-            },
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-        )
-        content.addView(taskScroll, LinearLayout.LayoutParams.MATCH_PARENT, maxTaskHeight)
-        content.addView(openAll, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-
-        val width = min(dp(PANEL_WIDTH_DP), safe.right - safe.left - dp(16)).coerceAtLeast(dp(248))
-        val params = baseParams(width, WindowManager.LayoutParams.WRAP_CONTENT)
-        val ui = PanelUi(root, activeLabel, taskContainer, pinButton, bubble)
-        val placement = panelPlacement(width, dp(320))
-        applyPanelPlacement(ui, placement)
+        val params = baseParams(metrics.width, WindowManager.LayoutParams.WRAP_CONTENT)
+        val ui = SpeechUi(root, content, title, body, footer, dot, counter, bubble, metrics.tailSize)
+        val placement = attachedPlacement(metrics.width, dp(96))
+        applySpeechPlacement(ui, placement)
         params.x = placement.x
         params.y = placement.y
-
         runCatching { windowManager.addView(root, params) }
-            .onFailure { AppGraph.diagnostics.error("add task panel: ${it.javaClass.simpleName}") }
+            .onFailure { AppGraph.diagnostics.error("add speech bubble: ${it.javaClass.simpleName}") }
             .onSuccess {
-                panelView = root
-                panelParams = params
-                panelUi = ui
-                renderPanel()
-                root.post(::repositionPanel)
-                playGreeting()
+                speechView = root
+                speechParams = params
+                speechUi = ui
+                root.post(::repositionSpeech)
             }
     }
 
-    private fun renderPanel() {
-        val ui = panelUi ?: return
-        val visibleTasks = visibleTasks()
-        val runningCount = visibleTasks.count { it.isCodexTask() && it.status == TaskStatus.RUNNING }
-        ui.activeLabel.text = context.resources.getQuantityString(
-            R.plurals.active_tasks_format,
-            runningCount,
-            runningCount,
-        )
-        updatePinState()
-        if (visibleTasks.isEmpty()) {
-            ui.taskRows.values.forEach { ui.taskContainer.removeView(it.root) }
-            ui.taskRows.clear()
-            if (ui.emptyView == null) {
-                val empty = label(context.getString(R.string.waiting_for_status), 13f, SECONDARY_TEXT_COLOR).apply {
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(14), dp(12), dp(14))
-                    background = roundedBackground(TASK_CARD_COLOR, 16f)
-                    maxLines = 2
-                }
-                ui.emptyView = empty
-                ui.taskContainer.addView(
-                    empty,
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                )
-            }
+    private fun renderSpeech() {
+        val ui = speechUi ?: return
+        handler.removeCallbacks(speechRotationRunnable)
+        val item = speechItems.getOrNull(speechIndex)
+        if (item == null) {
+            ui.title.visibility = View.GONE
+            ui.body.text = context.getString(R.string.waiting_for_status)
+            ui.footer.visibility = View.GONE
         } else {
-            ui.emptyView?.let(ui.taskContainer::removeView)
-            ui.emptyView = null
-            val shownTasks = visibleTasks.take(MAX_PANEL_TASKS)
-            val desiredKeys = shownTasks.map(CodexTask::sourceNotificationKey).toSet()
-            ui.taskRows.entries
-                .filter { it.key !in desiredKeys }
-                .forEach { (key, row) ->
-                    ui.taskContainer.removeView(row.root)
-                    ui.taskRows.remove(key)
-                }
-            shownTasks.forEachIndexed { index, task ->
-                val row = ui.taskRows.getOrPut(task.sourceNotificationKey, ::createTaskRow)
-                bindTaskRow(row, task)
-                val params = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply {
-                    if (index < shownTasks.lastIndex) bottomMargin = dp(8)
-                }
-                val currentIndex = ui.taskContainer.indexOfChild(row.root)
-                if (currentIndex != index) {
-                    if (currentIndex >= 0) ui.taskContainer.removeView(row.root)
-                    ui.taskContainer.addView(row.root, index, params)
-                } else {
-                    row.root.layoutParams = params
-                }
-            }
-        }
-    }
-
-    private fun createTaskRow(): TaskRowUi {
-        val row = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(11), dp(12), dp(11))
-            background = roundedBackground(TASK_CARD_COLOR, 16f, TASK_CARD_STROKE_COLOR)
-            isClickable = true
-            isFocusable = true
-        }
-        val titleLine = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val statusDot = View(context)
-        titleLine.addView(
-            statusDot,
-            LinearLayout.LayoutParams(dp(9), dp(9)).apply { marginEnd = dp(9) },
-        )
-        val title = label("", 14f, Color.WHITE, bold = true).apply { maxLines = 1 }
-        titleLine.addView(
-            title,
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
-        )
-        val status = label("", 10f, MUTED_COLOR, bold = true).apply {
-            isSingleLine = true
-            setPadding(dp(7), dp(3), dp(7), dp(3))
-        }
-        titleLine.addView(
-            status,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-        )
-        row.addView(titleLine)
-
-        val detail = label("", 11f, MUTED_COLOR).apply {
-            maxLines = 1
-            setPadding(0, dp(5), 0, 0)
-            visibility = View.GONE
-        }
-        row.addView(detail)
-        val summary = label("", 13f, SECONDARY_TEXT_COLOR).apply {
-            ellipsize = null
-            setLineSpacing(0f, 1.06f)
-            setPadding(0, dp(6), 0, 0)
-            visibility = View.GONE
-        }
-        row.addView(summary)
-        val age = label("", 11f, MUTED_COLOR).apply { setPadding(0, dp(7), 0, 0) }
-        row.addView(age)
-
-        val progress = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal)
-        val progressHolder = FrameLayout(context).apply {
-            visibility = View.GONE
-            setPadding(0, dp(8), 0, 0)
-            addView(
-                progress,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    dp(4),
-                    Gravity.BOTTOM,
-                ),
+            ui.title.text = item.title.orEmpty()
+            ui.title.visibility = if (item.title.isNullOrBlank()) View.GONE else View.VISIBLE
+            ui.body.text = item.text
+            ui.footer.visibility = if (speechItems.size > 1) View.VISIBLE else View.GONE
+            ui.counter.text = context.getString(R.string.speech_counter, speechIndex + 1, speechItems.size)
+            ui.dot.background = roundedBackground(priorityColor(item.priority), 6f)
+            ui.root.contentDescription = context.getString(
+                R.string.open_speech_for,
+                item.title ?: item.text.take(80),
             )
         }
-        row.addView(progressHolder, LinearLayout.LayoutParams.MATCH_PARENT, dp(12))
-        return TaskRowUi(row, statusDot, title, status, detail, summary, age, progressHolder, progress)
+        ui.root.post(::repositionSpeech)
+        if (speechItems.size > 1 && isSpeechVisible()) {
+            handler.postDelayed(speechRotationRunnable, SPEECH_ROTATION_MS)
+        }
     }
 
-    private fun bindTaskRow(ui: TaskRowUi, task: CodexTask) {
-        val color = taskDisplayColor(task)
-        ui.statusDot.background = roundedBackground(color, 6f)
-        ui.title.text = task.title
-        ui.status.text = taskDisplayStatusText(task)
-        ui.status.setTextColor(color)
-        ui.status.background = roundedBackground(withAlpha(color, 0x24), 10f)
-        ui.detail.text = task.detail.orEmpty()
-        ui.detail.visibility = if (task.detail.isNullOrBlank()) View.GONE else View.VISIBLE
-        ui.summary.text = task.summary.orEmpty()
-        ui.summary.visibility = if (task.summary.isNullOrBlank()) View.GONE else View.VISIBLE
-        ui.age.text = DateUtils.getRelativeTimeSpanString(
-            task.updatedAt.toEpochMilli(),
-            System.currentTimeMillis(),
-            DateUtils.SECOND_IN_MILLIS,
-            DateUtils.FORMAT_ABBREV_RELATIVE,
-        )
-        val taskProgress = task.progress
-        ui.progressHolder.visibility = if (taskProgress == null) View.GONE else View.VISIBLE
-        if (taskProgress != null) {
-            ui.progress.isIndeterminate = taskProgress.indeterminate
-            ui.progress.max = taskProgress.max.coerceAtLeast(1)
-            ui.progress.progress = taskProgress.value.coerceIn(0, ui.progress.max)
-            ui.progress.progressTintList = ColorStateList.valueOf(color)
-            ui.progress.indeterminateTintList = ColorStateList.valueOf(color)
+    private fun refreshSpeechItems(allowAutoShow: Boolean, contentChanged: Boolean) {
+        handler.removeCallbacks(speechExpirationRunnable)
+        val wasVisible = isSpeechVisible()
+        val selectedKey = speechItems.getOrNull(speechIndex)?.task?.sourceNotificationKey
+        val manual = speechManualMode && wasVisible
+        speechItems = selectSpeechItems(manual)
+        speechIndex = selectedKey
+            ?.let { key -> speechItems.indexOfFirst { it.task.sourceNotificationKey == key } }
+            ?.takeIf { it >= 0 }
+            ?: 0
+        if (contentChanged) autoSpeechSuppressed = false
+
+        when {
+            speechItems.isEmpty() && !manual -> hideSpeech(suppressAutomatic = false)
+            wasVisible -> renderSpeech()
+            allowAutoShow && settings.autoTaskBubblesEnabled && !autoSpeechSuppressed && speechItems.isNotEmpty() ->
+                showSpeech(manual = false)
         }
-        ui.root.setOnClickListener {
-            TaskOpener.openTask(context, task, settings.sourcePackage)
-            if (!settings.panelPinned) removePanel()
-        }
+        scheduleSpeechExpiration()
     }
+
+    private fun selectSpeechItems(manual: Boolean): List<PetSpeechItem> = PetSpeechSelector.select(
+        tasks,
+        if (manual) manualSpeechPolicy() else automaticSpeechPolicy(),
+    )
+
+    private fun automaticSpeechPolicy() = PetSpeechPolicy(
+        automaticEnabled = settings.autoTaskBubblesEnabled,
+        ongoingEnabled = true,
+        attentionEnabled = settings.attentionBubblesEnabled,
+        chatMessagesEnabled = settings.chatMessageBubblesEnabled,
+        completionsEnabled = settings.completionBubblesEnabled,
+        completedVisibleSeconds = settings.completedVisibleSeconds,
+    )
+
+    private fun manualSpeechPolicy() = PetSpeechPolicy(
+        automaticEnabled = true,
+        ongoingEnabled = true,
+        attentionEnabled = true,
+        chatMessagesEnabled = true,
+        completionsEnabled = true,
+        completedVisibleSeconds = MANUAL_HISTORY_SECONDS,
+        chatMessageVisibleSeconds = MANUAL_HISTORY_SECONDS,
+    )
+
+    private fun scheduleSpeechExpiration() {
+        handler.removeCallbacks(speechExpirationRunnable)
+        val delay = PetSpeechSelector.nextExpirationDelayMillis(speechItems) ?: return
+        handler.postDelayed(speechExpirationRunnable, delay + 50L)
+    }
+
+    private fun speechToken(item: PetSpeechItem): String =
+        "${item.task.sourceNotificationKey}:${item.task.updatedAt.toEpochMilli()}:${item.text}"
+
+    private fun hideSpeech(suppressAutomatic: Boolean) {
+        if (suppressAutomatic) autoSpeechSuppressed = true
+        speechManualMode = false
+        handler.removeCallbacks(speechRotationRunnable)
+        speechView?.visibility = View.GONE
+        renderTaskAnimation(force = true)
+    }
+
+    private fun removeSpeechWindow() {
+        handler.removeCallbacks(speechRotationRunnable)
+        handler.removeCallbacks(speechExpirationRunnable)
+        speechView?.let { runCatching { windowManager.removeViewImmediate(it) } }
+        speechView = null
+        speechParams = null
+        speechUi = null
+        speechItems = emptyList()
+        speechIndex = 0
+        speechManualMode = false
+    }
+
+    private fun isSpeechVisible(): Boolean = speechView?.visibility == View.VISIBLE
 
     private fun showMenu() {
-        removePanel()
         removeMenu()
+        speechView?.visibility = View.GONE
+        handler.removeCallbacks(speechRotationRunnable)
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(8), dp(8), dp(8), dp(8))
-            background = roundedBackground(PANEL_COLOR, 18f, PANEL_STROKE_COLOR)
+            background = roundedBackground(MENU_COLOR, 18f, SPEECH_STROKE_COLOR)
             elevation = dp(6).toFloat()
         }
         fun addAction(title: String, action: () -> Unit) {
@@ -602,7 +580,6 @@ class OverlayController(
                     setOnClickListener {
                         action()
                         removeMenu()
-                        if (settings.panelPinned && pet != null) showPanel()
                     }
                 },
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -621,7 +598,7 @@ class OverlayController(
         addAction(context.getString(R.string.hide_pet), ::hidePet)
         val width = dp(230)
         val params = baseParams(width, WindowManager.LayoutParams.WRAP_CONTENT)
-        val placement = panelPlacement(width, dp(220))
+        val placement = attachedPlacement(width, dp(220))
         params.x = placement.x
         params.y = placement.y
         runCatching { windowManager.addView(container, params) }
@@ -633,91 +610,19 @@ class OverlayController(
             }
     }
 
-    private fun hidePet() {
-        context.startService(Intent(context, OverlayService::class.java).setAction(OverlayService.ACTION_HIDE))
-    }
-
-    private fun setPanelPinned(pinned: Boolean) {
-        if (settings.panelPinned == pinned) return
-        settings = settings.copy(panelPinned = pinned)
-        updatePinState()
-        scope.launch { AppGraph.settings.setPanelPinned(pinned) }
-    }
-
-    private fun updatePinState() {
-        val button = panelUi?.pinButton ?: return
-        button.contentDescription = context.getString(
-            if (settings.panelPinned) R.string.unpin_panel else R.string.pin_panel,
-        )
-        button.imageTintList = ColorStateList.valueOf(
-            if (settings.panelPinned) ACTIVE_COLOR else MUTED_COLOR,
-        )
-        button.background = if (settings.panelPinned) {
-            roundedBackground(0x2410A37F, 18f)
-        } else {
-            roundedBackground(Color.TRANSPARENT, 18f)
-        }
-    }
-
-    private fun closePanel(unpin: Boolean) {
-        if (unpin) setPanelPinned(false)
-        removePanel()
-        renderTaskAnimation(force = true)
-    }
-
-    private fun removePanel() {
-        panelView?.let { runCatching { windowManager.removeViewImmediate(it) } }
-        panelView = null
-        panelParams = null
-        panelUi = null
-    }
-
     private fun removeMenu() {
         menuView?.let { runCatching { windowManager.removeViewImmediate(it) } }
         menuView = null
         menuParams = null
     }
 
+    private fun hidePet() {
+        context.startService(Intent(context, OverlayService::class.java).setAction(OverlayService.ACTION_HIDE))
+    }
+
     private fun displayTasks(): List<CodexTask> = tasks.filter { task ->
         task.isDisplayTask() &&
             (task.kind != TaskKind.CHAT_MESSAGE || settings.chatMessageBubblesEnabled)
-    }
-
-    private fun shouldAutoShowPanel(previous: List<CodexTask>, current: List<CodexTask>): Boolean {
-        if (pet == null || !settings.petVisible) return false
-        val old = previous.associateBy(CodexTask::sourceNotificationKey)
-        return current.any { task ->
-            val prior = old[task.sourceNotificationKey]
-            when {
-                task.kind == TaskKind.CHAT_MESSAGE ->
-                    settings.chatMessageBubblesEnabled &&
-                        (prior == null || prior.summary != task.summary || prior.title != task.title)
-                !task.isCodexTask() -> false
-                task.animationCue == TaskAnimationCue.DISCONNECTED ||
-                    task.animationCue == TaskAnimationCue.FAILED ||
-                    task.animationCue == TaskAnimationCue.RECONNECTING ||
-                    task.animationCue == TaskAnimationCue.WAITING_FOR_INPUT ->
-                    settings.attentionBubblesEnabled && prior?.animationCue != task.animationCue
-                task.animationCue == TaskAnimationCue.COMPLETED || task.status == TaskStatus.COMPLETED ->
-                    settings.completionBubblesEnabled &&
-                        (prior?.animationCue != task.animationCue || prior.status != task.status)
-                else -> settings.autoTaskBubblesEnabled && prior == null && task.status == TaskStatus.RUNNING
-            }
-        }
-    }
-
-    private fun maybeShowCurrentPanel() {
-        if (panelView != null) return
-        if (shouldAutoShowPanel(emptyList(), tasks)) showPanel()
-    }
-
-    private fun visibleTasks(): List<CodexTask> {
-        val now = Instant.now()
-        return displayTasks().filter { task ->
-            task.status != TaskStatus.COMPLETED ||
-                (settings.completedVisibleSeconds > 0 &&
-                    Duration.between(task.updatedAt, now).seconds <= settings.completedVisibleSeconds)
-        }
     }
 
     private fun renderTaskAnimation(force: Boolean = false) {
@@ -729,21 +634,21 @@ class OverlayController(
     private fun taskAnimationState(): PetAnimationState {
         val current = displayTasks().filter(CodexTask::isCodexTask)
         return when {
+            current.any { it.animationCue == TaskAnimationCue.WAITING_FOR_INPUT } ->
+                PetAnimationState.WAITING
             current.any {
                 it.status == TaskStatus.ERROR ||
                     it.animationCue == TaskAnimationCue.FAILED ||
                     it.animationCue == TaskAnimationCue.DISCONNECTED
-            } ->
-                PetAnimationState.FAILED
-            current.any {
-                it.animationCue == TaskAnimationCue.WAITING_FOR_INPUT ||
-                    it.animationCue == TaskAnimationCue.RECONNECTING
-            } -> PetAnimationState.WAITING
-            current.any { it.animationCue == TaskAnimationCue.REVIEWING } -> PetAnimationState.REVIEW
-            current.any { it.status == TaskStatus.RUNNING || it.animationCue == TaskAnimationCue.ACTIVE } ->
-                PetAnimationState.RUNNING
+            } -> PetAnimationState.FAILED
+            current.any { it.animationCue == TaskAnimationCue.RECONNECTING } ->
+                PetAnimationState.WAITING
+            current.any { it.animationCue == TaskAnimationCue.REVIEWING } ->
+                PetAnimationState.REVIEW
             current.any { it.status == TaskStatus.COMPLETED || it.animationCue == TaskAnimationCue.COMPLETED } ->
                 PetAnimationState.REVIEW
+            current.any { it.status == TaskStatus.RUNNING || it.animationCue == TaskAnimationCue.ACTIVE } ->
+                PetAnimationState.RUNNING
             else -> PetAnimationState.IDLE
         }
     }
@@ -761,24 +666,27 @@ class OverlayController(
         if (sequence == null) {
             image.setImageDrawable(visual.drawable)
             val native = image.drawable as? Animatable
-            if (settings.animationsEnabled && ValueAnimator.areAnimatorsEnabled()) native?.start() else native?.stop()
+            if (animationsAllowed()) native?.start() else native?.stop()
             return
         }
-        if (!settings.animationsEnabled || !ValueAnimator.areAnimatorsEnabled()) {
+        if (!animationsAllowed()) {
             image.setImageDrawable(filteredDrawable(sequence.frames.first()))
             return
         }
         val animation = animationDrawable(sequence, oneShot = false)
         image.setImageDrawable(animation)
-        image.post(animation::start)
+        image.post { if (image.drawable === animation) animation.start() }
     }
 
-    private fun playOneShot(state: PetAnimationState, onFinished: () -> Unit = { renderTaskAnimation(force = true) }) {
+    private fun playOneShot(
+        state: PetAnimationState,
+        onFinished: () -> Unit = { renderTaskAnimation(force = true) },
+    ) {
         val sequence = pet?.frameSequences?.get(state) ?: run {
             onFinished()
             return
         }
-        if (!settings.animationsEnabled || !ValueAnimator.areAnimatorsEnabled()) {
+        if (!animationsAllowed()) {
             onFinished()
             return
         }
@@ -789,7 +697,7 @@ class OverlayController(
         displayedSequence = sequence
         val animation = animationDrawable(sequence, oneShot = true)
         image.setImageDrawable(animation)
-        image.post(animation::start)
+        image.post { if (image.drawable === animation) animation.start() }
         val speed = settings.animationSpeed.coerceIn(0.5f, 2f)
         val duration = (sequence.frameDurationsMs.sum() / speed).toLong().coerceAtLeast(80L)
         val restore = Runnable {
@@ -803,17 +711,19 @@ class OverlayController(
     private fun playGreeting() {
         when (taskAnimationState()) {
             PetAnimationState.FAILED, PetAnimationState.WAITING -> renderTaskAnimation(force = true)
-            else -> playOneShot(PetAnimationState.WAVING) { showLookTowardPanel() }
+            else -> playOneShot(PetAnimationState.WAVING, ::showLookTowardSpeech)
         }
     }
 
-    private fun showLookTowardPanel() {
+    private fun showLookTowardSpeech() {
         val directions = pet?.lookDirections.orEmpty()
         val petLayout = petParams
-        val panelLayout = panelParams
-        val panel = panelView
+        val speechLayout = speechParams
+        val speech = speechView
         val image = petImage
-        if (directions.size != 16 || petLayout == null || panelLayout == null || panel == null || image == null) {
+        if (directions.size != 16 || petLayout == null || speechLayout == null || speech == null || image == null ||
+            !isSpeechVisible()
+        ) {
             renderTaskAnimation(force = true)
             return
         }
@@ -821,10 +731,10 @@ class OverlayController(
         stopNativeAnimation()
         val petCenterX = petLayout.x + dp(settings.petSizeDp) / 2f
         val petCenterY = petLayout.y + dp(settings.petSizeDp) / 2f
-        val panelCenterX = panelLayout.x + panelLayout.width / 2f
-        val panelCenterY = panelLayout.y + panel.measuredHeight / 2f
+        val speechCenterX = speechLayout.x + speechLayout.width / 2f
+        val speechCenterY = speechLayout.y + speech.measuredHeight / 2f
         val degrees = Math.toDegrees(
-            atan2((panelCenterX - petCenterX).toDouble(), (petCenterY - panelCenterY).toDouble()),
+            atan2((speechCenterX - petCenterX).toDouble(), (petCenterY - speechCenterY).toDouble()),
         ).let { if (it < 0) it + 360.0 else it }
         val index = ((degrees / 22.5).roundToInt() % 16).coerceIn(0, 15)
         displayedState = null
@@ -857,6 +767,9 @@ class OverlayController(
             paint.isDither = true
         }
 
+    private fun animationsAllowed(): Boolean =
+        settings.animationsEnabled && ValueAnimator.areAnimatorsEnabled()
+
     private fun cancelTransient() {
         transientRunnable?.let(handler::removeCallbacks)
         transientRunnable = null
@@ -879,7 +792,7 @@ class OverlayController(
             addUpdateListener {
                 params.x = it.animatedValue as Int
                 runCatching { windowManager.updateViewLayout(root, params) }
-                if (settings.panelPinned) repositionPanel()
+                repositionSpeech()
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) = savePosition()
@@ -909,13 +822,34 @@ class OverlayController(
         params.y = params.y.coerceIn(safe.top, (safe.bottom - size).coerceAtLeast(safe.top))
     }
 
-    private fun repositionPanel() {
-        val view = panelView ?: return
-        val params = panelParams ?: return
-        val ui = panelUi ?: return
-        val height = view.measuredHeight.takeIf { it > 0 } ?: dp(320)
-        val placement = panelPlacement(params.width, height)
-        applyPanelPlacement(ui, placement)
+    private fun updateSpeechGeometry() {
+        val ui = speechUi ?: return
+        val params = speechParams ?: return
+        val metrics = speechMetrics()
+        params.width = metrics.width
+        ui.title.textSize = metrics.titleSp
+        ui.body.textSize = metrics.bodySp
+        ui.body.maxLines = metrics.maxLines
+        ui.counter.textSize = metrics.metaSp
+        ui.content.setPadding(
+            metrics.horizontalPadding,
+            metrics.verticalPadding,
+            metrics.horizontalPadding,
+            metrics.verticalPadding,
+        )
+        ui.tailSize = metrics.tailSize
+        ui.bubble = newSpeechDrawable(metrics).also { ui.root.background = it }
+        repositionSpeech()
+    }
+
+    private fun repositionSpeech() {
+        if (!isSpeechVisible()) return
+        val view = speechView ?: return
+        val params = speechParams ?: return
+        val ui = speechUi ?: return
+        val height = view.measuredHeight.takeIf { it > 0 } ?: dp(96)
+        val placement = attachedPlacement(params.width, height)
+        applySpeechPlacement(ui, placement)
         params.x = placement.x
         params.y = placement.y
         runCatching { windowManager.updateViewLayout(view, params) }
@@ -924,17 +858,17 @@ class OverlayController(
     private fun repositionMenu() {
         val view = menuView ?: return
         val params = menuParams ?: return
-        val placement = panelPlacement(params.width, view.measuredHeight.takeIf { it > 0 } ?: dp(220))
+        val placement = attachedPlacement(params.width, view.measuredHeight.takeIf { it > 0 } ?: dp(220))
         params.x = placement.x
         params.y = placement.y
         runCatching { windowManager.updateViewLayout(view, params) }
     }
 
-    private fun panelPlacement(width: Int, estimatedHeight: Int): PanelPlacement {
-        val petLayout = petParams ?: return PanelPlacement(0, 0, TailEdge.RIGHT, 0f)
+    private fun attachedPlacement(width: Int, estimatedHeight: Int): AttachedPlacement {
+        val petLayout = petParams ?: return AttachedPlacement(0, 0, TailEdge.RIGHT, 0f)
         val safe = safeBounds()
         val size = dp(settings.petSizeDp)
-        val margin = dp(6)
+        val margin = dp((settings.petSizeDp / 14).coerceIn(4, 10))
         val petCenterX = petLayout.x + size / 2
         val petCenterY = petLayout.y + size / 2
         val rightX = petLayout.x + size + margin
@@ -947,7 +881,7 @@ class OverlayController(
             val x = if (useRight) rightX else leftX
             val y = (petCenterY - estimatedHeight / 2)
                 .coerceIn(safe.top, (safe.bottom - estimatedHeight).coerceAtLeast(safe.top))
-            return PanelPlacement(
+            return AttachedPlacement(
                 x = x,
                 y = y,
                 tailEdge = if (useRight) TailEdge.LEFT else TailEdge.RIGHT,
@@ -963,7 +897,7 @@ class OverlayController(
         val x = (petCenterX - width / 2)
             .coerceIn(safe.left, (safe.right - width).coerceAtLeast(safe.left))
         val y = if (useBelow) belowY else aboveY
-        return PanelPlacement(
+        return AttachedPlacement(
             x = x,
             y = y.coerceIn(safe.top, (safe.bottom - estimatedHeight).coerceAtLeast(safe.top)),
             tailEdge = if (useBelow) TailEdge.TOP else TailEdge.BOTTOM,
@@ -971,9 +905,9 @@ class OverlayController(
         )
     }
 
-    private fun applyPanelPlacement(ui: PanelUi, placement: PanelPlacement) {
+    private fun applySpeechPlacement(ui: SpeechUi, placement: AttachedPlacement) {
         ui.bubble.pointTo(placement.tailEdge, placement.tailOffsetPx)
-        val tail = dp(PANEL_TAIL_DP)
+        val tail = ui.tailSize
         ui.root.setPadding(
             if (placement.tailEdge == TailEdge.LEFT) tail else 0,
             if (placement.tailEdge == TailEdge.TOP) tail else 0,
@@ -1001,29 +935,61 @@ class OverlayController(
         layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER
     }
 
-    private data class PanelUi(
+    private fun speechMetrics(): SpeechMetrics {
+        val petDp = settings.petSizeDp
+        return SpeechMetrics(
+            width = dp((petDp * 2.75f).roundToInt().coerceIn(168, 300)),
+            tailSize = dp((petDp / 8).coerceIn(8, 16)),
+            radius = dp((petDp / 4).coerceIn(14, 26)).toFloat(),
+            horizontalPadding = dp((petDp / 6).coerceIn(10, 20)),
+            verticalPadding = dp((petDp / 9).coerceIn(8, 15)),
+            titleSp = (petDp * 0.15f).coerceIn(12f, 16f),
+            bodySp = (petDp * 0.16f).coerceIn(12.5f, 17f),
+            metaSp = (petDp * 0.12f).coerceIn(10f, 12.5f),
+            maxLines = if (petDp < 64) 3 else 4,
+        )
+    }
+
+    private fun newSpeechDrawable(metrics: SpeechMetrics) = SpeechBubbleDrawable(
+        color = SPEECH_COLOR,
+        strokeColor = SPEECH_STROKE_COLOR,
+        cornerRadiusPx = metrics.radius,
+        tailSizePx = metrics.tailSize.toFloat(),
+        strokeWidthPx = dp(1).toFloat(),
+    )
+
+    private fun priorityColor(priority: PetSpeechPriority): Int = when (priority) {
+        PetSpeechPriority.NEEDS_INPUT -> 0xFFFFC857.toInt()
+        PetSpeechPriority.BLOCKED -> 0xFFFF7474.toInt()
+        PetSpeechPriority.READY -> 0xFF77D7B1.toInt()
+        PetSpeechPriority.RUNNING -> 0xFF55B7FF.toInt()
+    }
+
+    private data class SpeechUi(
         val root: FrameLayout,
-        val activeLabel: TextView,
-        val taskContainer: LinearLayout,
-        val pinButton: ImageButton,
-        val bubble: SpeechBubbleDrawable,
-        val taskRows: MutableMap<String, TaskRowUi> = linkedMapOf(),
-        var emptyView: View? = null,
-    )
-
-    private data class TaskRowUi(
-        val root: LinearLayout,
-        val statusDot: View,
+        val content: LinearLayout,
         val title: TextView,
-        val status: TextView,
-        val detail: TextView,
-        val summary: TextView,
-        val age: TextView,
-        val progressHolder: FrameLayout,
-        val progress: ProgressBar,
+        val body: TextView,
+        val footer: LinearLayout,
+        val dot: View,
+        val counter: TextView,
+        var bubble: SpeechBubbleDrawable,
+        var tailSize: Int,
     )
 
-    private data class PanelPlacement(
+    private data class SpeechMetrics(
+        val width: Int,
+        val tailSize: Int,
+        val radius: Float,
+        val horizontalPadding: Int,
+        val verticalPadding: Int,
+        val titleSp: Float,
+        val bodySp: Float,
+        val metaSp: Float,
+        val maxLines: Int,
+    )
+
+    private data class AttachedPlacement(
         val x: Int,
         val y: Int,
         val tailEdge: TailEdge,
@@ -1047,17 +1013,6 @@ class OverlayController(
 
     private fun orientation(): Int = context.resources.configuration.orientation
 
-    private fun iconButton(drawableRes: Int, description: String, action: () -> Unit): ImageButton =
-        ImageButton(context).apply {
-            setImageResource(drawableRes)
-            contentDescription = description
-            imageTintList = ColorStateList.valueOf(MUTED_COLOR)
-            background = roundedBackground(Color.TRANSPARENT, 18f)
-            setPadding(dp(9), dp(9), dp(9), dp(9))
-            elevation = 0f
-            setOnClickListener { action() }
-        }
-
     private fun roundedBackground(
         color: Int,
         radiusDp: Float,
@@ -1078,65 +1033,16 @@ class OverlayController(
             ellipsize = TextUtils.TruncateAt.END
         }
 
-    private fun statusColor(status: TaskStatus): Int = when (status) {
-        TaskStatus.RUNNING -> ACTIVE_COLOR
-        TaskStatus.COMPLETED -> 0xFF7DD3B0.toInt()
-        TaskStatus.ERROR -> 0xFFFF7A7A.toInt()
-        TaskStatus.UNKNOWN -> 0xFF9AA3AA.toInt()
-    }
-
-    private fun statusText(status: TaskStatus): String = context.getString(
-        when (status) {
-            TaskStatus.RUNNING -> R.string.task_status_running
-            TaskStatus.COMPLETED -> R.string.task_status_completed
-            TaskStatus.ERROR -> R.string.task_status_error
-            TaskStatus.UNKNOWN -> R.string.task_status_unknown
-        },
-    )
-
-    private fun taskDisplayStatusText(task: CodexTask): String {
-        val textResource = when {
-            task.kind == TaskKind.CHAT_MESSAGE -> R.string.task_status_message
-            task.animationCue == TaskAnimationCue.DISCONNECTED -> R.string.task_status_disconnected
-            task.animationCue == TaskAnimationCue.RECONNECTING -> R.string.task_status_reconnecting
-            task.animationCue == TaskAnimationCue.WAITING_FOR_INPUT -> R.string.task_status_waiting
-            task.animationCue == TaskAnimationCue.REVIEWING -> R.string.task_status_reviewing
-            else -> return statusText(task.status)
-        }
-        return context.getString(textResource)
-    }
-
-    private fun taskDisplayColor(task: CodexTask): Int = when {
-        task.kind == TaskKind.CHAT_MESSAGE -> MESSAGE_COLOR
-        task.animationCue == TaskAnimationCue.DISCONNECTED ||
-            task.animationCue == TaskAnimationCue.FAILED -> 0xFFFF7A7A.toInt()
-        task.animationCue == TaskAnimationCue.RECONNECTING ||
-            task.animationCue == TaskAnimationCue.WAITING_FOR_INPUT -> 0xFFFFC857.toInt()
-        task.animationCue == TaskAnimationCue.REVIEWING -> 0xFF77BDFB.toInt()
-        else -> statusColor(task.status)
-    }
-
-    private fun withAlpha(color: Int, alpha: Int): Int = Color.argb(
-        alpha.coerceIn(0, 255),
-        Color.red(color),
-        Color.green(color),
-        Color.blue(color),
-    )
-
     private fun dp(value: Int): Int = (value * context.resources.displayMetrics.density).roundToInt()
 
     private companion object {
-        const val MAX_PANEL_TASKS = 6
-        const val PANEL_WIDTH_DP = 360
-        const val PANEL_TAIL_DP = 12
+        const val MANUAL_HISTORY_SECONDS = 60
+        const val SPEECH_ROTATION_MS = 6_500L
         const val LOOK_HOLD_MS = 900L
-        const val PANEL_STROKE_COLOR = 0x32FFFFFF
-        const val TASK_CARD_STROKE_COLOR = 0x1FFFFFFF
-        val SECONDARY_TEXT_COLOR = 0xFFD2D6DA.toInt()
-        val MUTED_COLOR = 0xFF9099A1.toInt()
-        val PANEL_COLOR = 0xF51B1D22.toInt()
-        val TASK_CARD_COLOR = 0xE826292F.toInt()
-        val ACTIVE_COLOR = 0xFF20C997.toInt()
-        val MESSAGE_COLOR = 0xFFB69CFF.toInt()
+        const val SPEECH_STROKE_COLOR = 0x38FFFFFF
+        val SPEECH_TEXT_COLOR = 0xFFF2F4F5.toInt()
+        val MUTED_COLOR = 0xFFA8B0B6.toInt()
+        val SPEECH_COLOR = 0xF21B1D22.toInt()
+        val MENU_COLOR = 0xFA1B1D22.toInt()
     }
 }

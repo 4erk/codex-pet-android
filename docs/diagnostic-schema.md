@@ -1,10 +1,10 @@
-# Sanitized diagnostics schema v2
+# Sanitized diagnostics schema v3
 
 Корневые поля:
 
 | Поле | Содержание |
 |---|---|
-| `schemaVersion` | Версия схемы, сейчас `2` |
+| `schemaVersion` | Версия схемы, сейчас `3` |
 | `exportedAt` | Unix time в milliseconds |
 | `sanitized` | Всегда `true` для встроенного export |
 | `app` | application id/version/build type |
@@ -17,7 +17,7 @@
 
 Notification identity fields `key`, `tag`, `groupKey`, `shortcutId` экспортируются только как SHA-256 hashes. `packageName`, numeric notification id, flags, category, channel и timestamps остаются открытыми для воспроизводимости.
 
-`notificationRole` показывает решение classifier: `CODEX_TASK`, `CODEX_AVATAR` или `CHAT_MESSAGE`. Settings v2 также фиксируют видимость pet, pin и четыре переключателя auto/reaction bubbles.
+`notificationRole` показывает решение classifier: `CODEX_TASK`, `CODEX_AVATAR` или `CHAT_MESSAGE`. Settings v3 также фиксируют видимость pet, общий `autoSpeechEnabled` и переключатели attention/chat/completion.
 
 Из известных text extras экспортируются:
 

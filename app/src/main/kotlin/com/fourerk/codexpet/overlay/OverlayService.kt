@@ -49,6 +49,8 @@ class OverlayService : Service() {
                 val enabled = AppGraph.settings.settings.value.autoTaskBubblesEnabled
                 AppGraph.settings.setAutoTaskBubblesEnabled(!enabled)
             }
+            ACTION_NEXT_SPEECH -> controller.showNextSpeech()
+            ACTION_PREVIEW_ANIMATION -> controller.previewAnimation()
         }
         return START_STICKY
     }
@@ -108,6 +110,12 @@ class OverlayService : Service() {
             Intent(this, OverlayService::class.java).setAction(ACTION_TOGGLE_AUTO_BUBBLES),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val nextSpeechIntent = PendingIntent.getService(
+            this,
+            4,
+            Intent(this, OverlayService::class.java).setAction(ACTION_NEXT_SPEECH),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val stateText = getString(
             R.string.overlay_notification_state,
             getString(if (settings.petVisible) R.string.pet_visible else R.string.pet_hidden),
@@ -137,6 +145,11 @@ class OverlayService : Service() {
                     else R.string.enable_auto_bubbles,
                 ),
                 bubblesIntent,
+            )
+            .addAction(
+                R.drawable.ic_notification,
+                getString(R.string.next_speech),
+                nextSpeechIntent,
             )
             .build()
         if (Build.VERSION.SDK_INT >= 34) {
@@ -173,6 +186,8 @@ class OverlayService : Service() {
         const val ACTION_HIDE = "com.fourerk.codexpet.action.HIDE_OVERLAY"
         const val ACTION_SHOW = "com.fourerk.codexpet.action.SHOW_OVERLAY"
         const val ACTION_TOGGLE_AUTO_BUBBLES = "com.fourerk.codexpet.action.TOGGLE_AUTO_BUBBLES"
+        const val ACTION_NEXT_SPEECH = "com.fourerk.codexpet.action.NEXT_SPEECH"
+        const val ACTION_PREVIEW_ANIMATION = "com.fourerk.codexpet.action.PREVIEW_ANIMATION"
         private const val CHANNEL_ID = "codex_pet_overlay"
         private const val NOTIFICATION_ID = 4101
     }
