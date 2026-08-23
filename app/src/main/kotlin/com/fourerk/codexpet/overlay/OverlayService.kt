@@ -12,7 +12,8 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.fourerk.codexpet.R
 import com.fourerk.codexpet.app.AppGraph
-import com.fourerk.codexpet.app.MainActivity
+import com.fourerk.codexpet.app.HomeActivity
+import com.fourerk.codexpet.pet.PetAnimationState
 import com.fourerk.codexpet.settings.AppSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,13 +25,13 @@ import kotlinx.coroutines.launch
 
 class OverlayService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private lateinit var controller: OverlayController
+    private lateinit var controller: OverlayControllerV2
     private var collectors: Job? = null
 
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        controller = OverlayController(this, serviceScope)
+        controller = OverlayControllerV2(this, serviceScope)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -49,8 +50,12 @@ class OverlayService : Service() {
                 val enabled = AppGraph.settings.settings.value.autoTaskBubblesEnabled
                 AppGraph.settings.setAutoTaskBubblesEnabled(!enabled)
             }
-            ACTION_NEXT_SPEECH -> controller.showNextSpeech()
-            ACTION_PREVIEW_ANIMATION -> controller.previewAnimation()
+            ACTION_MORE_SPEECH -> controller.showMoreSpeech()
+            ACTION_PREVIEW_ANIMATION -> {
+                val state = intent.getStringExtra(EXTRA_ANIMATION_STATE)
+                    ?.let { runCatching { PetAnimationState.valueOf(it) }.getOrNull() }
+                controller.previewAnimation(state)
+            }
         }
         return START_STICKY
     }
@@ -93,7 +98,7 @@ class OverlayService : Service() {
         val openIntent = PendingIntent.getActivity(
             this,
             1,
-            Intent(this, MainActivity::class.java),
+            Intent(this, HomeActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val visibilityIntent = PendingIntent.getService(
@@ -110,10 +115,10 @@ class OverlayService : Service() {
             Intent(this, OverlayService::class.java).setAction(ACTION_TOGGLE_AUTO_BUBBLES),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val nextSpeechIntent = PendingIntent.getService(
+        val moreSpeechIntent = PendingIntent.getService(
             this,
             4,
-            Intent(this, OverlayService::class.java).setAction(ACTION_NEXT_SPEECH),
+            Intent(this, OverlayService::class.java).setAction(ACTION_MORE_SPEECH),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val stateText = getString(
@@ -148,8 +153,8 @@ class OverlayService : Service() {
             )
             .addAction(
                 R.drawable.ic_notification,
-                getString(R.string.next_speech),
-                nextSpeechIntent,
+                getString(R.string.more_speech),
+                moreSpeechIntent,
             )
             .build()
         if (Build.VERSION.SDK_INT >= 34) {
@@ -186,8 +191,9 @@ class OverlayService : Service() {
         const val ACTION_HIDE = "com.fourerk.codexpet.action.HIDE_OVERLAY"
         const val ACTION_SHOW = "com.fourerk.codexpet.action.SHOW_OVERLAY"
         const val ACTION_TOGGLE_AUTO_BUBBLES = "com.fourerk.codexpet.action.TOGGLE_AUTO_BUBBLES"
-        const val ACTION_NEXT_SPEECH = "com.fourerk.codexpet.action.NEXT_SPEECH"
+        const val ACTION_MORE_SPEECH = "com.fourerk.codexpet.action.MORE_SPEECH"
         const val ACTION_PREVIEW_ANIMATION = "com.fourerk.codexpet.action.PREVIEW_ANIMATION"
+        const val EXTRA_ANIMATION_STATE = "animation_state"
         private const val CHANNEL_ID = "codex_pet_overlay"
         private const val NOTIFICATION_ID = 4101
     }

@@ -9,11 +9,11 @@ import com.fourerk.codexpet.diagnostics.SanitizedText
 import com.fourerk.codexpet.pet.PetAssetProvider
 import com.fourerk.codexpet.pet.PetInspection
 import com.fourerk.codexpet.task.CodexTask
-import com.fourerk.codexpet.task.TaskKind
-import com.fourerk.codexpet.task.TaskAnimationCue
-import com.fourerk.codexpet.task.TaskAnimationDecision
-import com.fourerk.codexpet.task.TaskAnimationCueResolver
 import com.fourerk.codexpet.task.CueSignalSource
+import com.fourerk.codexpet.task.TaskAnimationCue
+import com.fourerk.codexpet.task.TaskAnimationCueResolver
+import com.fourerk.codexpet.task.TaskAnimationDecision
+import com.fourerk.codexpet.task.TaskKind
 import com.fourerk.codexpet.task.TaskProgress
 import com.fourerk.codexpet.task.TaskSignals
 import com.fourerk.codexpet.task.TaskStatusResolver
@@ -43,6 +43,8 @@ class NotificationParser {
         }.getOrNull()
         val inboxLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
             ?.map(CharSequence::toString)
+            ?.map(String::trim)
+            ?.filter(String::isNotBlank)
             .orEmpty()
         val latestMessage = messagingStyle?.messages?.lastOrNull()?.text?.toString()
         val title = firstText(
@@ -50,26 +52,36 @@ class NotificationParser {
             extras.getCharSequence(Notification.EXTRA_TITLE_BIG),
             extras.getCharSequence(Notification.EXTRA_TITLE),
             notification.shortcutId,
-            if (groupSummary) "ChatGPT notification group" else "Codex task",
+            if (groupSummary) "ChatGPT" else "Codex task",
         ).orEmpty().singleLine(120)
-        val summary = firstText(
-            extras.getCharSequence(Notification.EXTRA_BIG_TEXT),
-            latestMessage,
-            extras.getCharSequence(Notification.EXTRA_TEXT),
-            inboxLines.takeIf { it.isNotEmpty() }?.joinToString("\n"),
-        )?.multiLine(MAX_TASK_TEXT)
+
+        // Group summaries often contain several child lines. Showing all lines as one bubble is noisy,
+        // while inventing one task per line would create fake deep links. Keep only the freshest line;
+        // the full active notification set is reconciled separately and real children win over summary.
+        val summary = if (groupSummary && inboxLines.isNotEmpty()) {
+            inboxLines.last().multiLine(MAX_TASK_TEXT)
+        } else {
+            firstText(
+                extras.getCharSequence(Notification.EXTRA_BIG_TEXT),
+                latestMessage,
+                extras.getCharSequence(Notification.EXTRA_TEXT),
+                inboxLines.takeIf { it.isNotEmpty() }?.joinToString("\n"),
+            )?.multiLine(MAX_TASK_TEXT)
+        }
         val detail = firstText(
             extras.getCharSequence(EXTRA_SHORT_CRITICAL_TEXT),
             extras.getCharSequence(Notification.EXTRA_SUB_TEXT),
             extras.getCharSequence(Notification.EXTRA_INFO_TEXT),
+            if (groupSummary && inboxLines.size > 1) "${inboxLines.size} обновлений в группе" else null,
         )?.singleLine(160)
+
         val notificationRole = ChatGptNotificationClassifier.classify(notification)
         val kind = when (notificationRole) {
             ChatGptNotificationRole.CODEX_TASK -> TaskKind.TASK
             ChatGptNotificationRole.CODEX_AVATAR -> TaskKind.BUBBLE_CONTROLLER
             ChatGptNotificationRole.CHAT_MESSAGE -> TaskKind.CHAT_MESSAGE
         }
-        val fallbackText = listOfNotNull(title, summary, detail, inboxLines.joinToString(" "))
+        val fallbackText = listOfNotNull(title, summary, detail, inboxLines.lastOrNull())
             .joinToString(" ")
             .take(MAX_TASK_TEXT)
         val status = TaskStatusResolver.resolve(
@@ -96,24 +108,28 @@ class NotificationParser {
             null
         }
         val bubble = notification.bubbleMetadata
-        val taskId = if (kind == TaskKind.BUBBLE_CONTROLLER) {
-            "avatar:${sbn.key}"
-        } else {
-            notification.shortcutId
+        val taskId = when {
+            kind == TaskKind.BUBBLE_CONTROLLER -> "avatar:${sbn.key}"
+            groupSummary -> "group:${sbn.groupKey ?: sbn.key}"
+            else -> notification.shortcutId
                 ?.takeIf(String::isNotBlank)
                 ?.let { "shortcut:$it" }
                 ?: "notification:${sbn.key}"
         }
         val notes = buildList {
             if (kind == TaskKind.BUBBLE_CONTROLLER) {
-                add("Avatar notification is retained for pet/deep-link data but hidden from the task list")
+                add("Avatar notification is retained for pet/deep-link data but hidden from speech")
             }
             if (kind == TaskKind.CHAT_MESSAGE) {
-                add("Regular ChatGPT notification is shown as a chat message and never counted as a Codex task")
+                add("Regular ChatGPT notification is a chat message and never counted as a Codex task")
             }
             add("Animation cue: ${animationDecision.cue} (${animationDecision.source})")
-            if (groupSummary) add("FLAG_GROUP_SUMMARY is set; item is retained as an aggregate, not expanded into invented tasks")
-            if (inboxLines.size > 1) add("Inbox-style lines detected: ${inboxLines.size}; lines are not treated as independent tasks without stable IDs")
+            if (groupSummary) {
+                add("FLAG_GROUP_SUMMARY is set; real active children suppress this aggregate during snapshot reconcile")
+            }
+            if (inboxLines.size > 1) {
+                add("Inbox-style lines detected: ${inboxLines.size}; latest line retained, no fake child tasks created")
+            }
             addAll(petInspection.notes)
         }
         val snapshot = NotificationSnapshot(
@@ -166,7 +182,7 @@ class NotificationParser {
         return ParsedNotification(
             task = CodexTask(
                 id = taskId,
-                title = title.ifBlank { "Codex task" },
+                title = title.ifBlank { if (groupSummary) "ChatGPT" else "Codex task" },
                 summary = summary,
                 status = status,
                 updatedAt = Instant.ofEpochMilli(sbn.postTime),
@@ -179,6 +195,7 @@ class NotificationParser {
                 detail = detail,
                 animationCue = animationDecision.cue,
                 animationCueSource = animationDecision.source,
+                isGroupSummary = groupSummary,
             ),
             snapshot = snapshot,
         )

@@ -52,14 +52,15 @@ internal class SpeechBubbleDrawable(
 
     override fun draw(canvas: Canvas) {
         calculateBody()
-        canvas.drawRoundRect(body, cornerRadiusPx, cornerRadiusPx, fill)
         buildTail()
+        canvas.drawRoundRect(body, cornerRadiusPx, cornerRadiusPx, fill)
         canvas.drawPath(tail, fill)
         if (stroke.strokeWidth > 0f) {
             canvas.drawRoundRect(body, cornerRadiusPx, cornerRadiusPx, stroke)
-            // Paint the tail once more to erase the body's stroke under its base, then outline
-            // only the two exposed sides. This avoids a dark seam inside the comic bubble.
+            // The fill triangle intentionally overlaps the body by a few physical pixels. Repaint
+            // it after the body stroke so anti-aliasing cannot leave a hairline at the join.
             canvas.drawPath(tail, fill)
+            // tailOutline contains only the two exposed sides; there is deliberately no base line.
             canvas.drawPath(tailOutline, stroke)
         }
     }
@@ -104,35 +105,39 @@ internal class SpeechBubbleDrawable(
         tail.reset()
         tailOutline.reset()
         val halfBase = tailSizePx * 0.72f
+        val overlap = max(2f, stroke.strokeWidth * 1.75f)
         when (tailEdge) {
             TailEdge.LEFT, TailEdge.RIGHT -> {
                 val center = tailOffsetPx.coerceIn(
                     body.top + cornerRadiusPx + halfBase,
                     max(body.top + cornerRadiusPx + halfBase, body.bottom - cornerRadiusPx - halfBase),
                 )
-                val edgeX = if (tailEdge == TailEdge.LEFT) body.left else body.right
+                val outlineEdgeX = if (tailEdge == TailEdge.LEFT) body.left else body.right
+                val fillEdgeX = if (tailEdge == TailEdge.LEFT) body.left + overlap else body.right - overlap
                 val pointX = if (tailEdge == TailEdge.LEFT) bounds.left.toFloat() else bounds.right.toFloat()
-                tail.moveTo(edgeX, center - halfBase)
+                tail.moveTo(fillEdgeX, center - halfBase)
                 tail.lineTo(pointX, center)
-                tail.lineTo(edgeX, center + halfBase)
-                tailOutline.moveTo(edgeX, center - halfBase)
+                tail.lineTo(fillEdgeX, center + halfBase)
+                tail.close()
+                tailOutline.moveTo(outlineEdgeX, center - halfBase)
                 tailOutline.lineTo(pointX, center)
-                tailOutline.lineTo(edgeX, center + halfBase)
+                tailOutline.lineTo(outlineEdgeX, center + halfBase)
             }
             TailEdge.TOP, TailEdge.BOTTOM -> {
                 val minimum = body.left + cornerRadiusPx + halfBase
                 val maximum = max(minimum, min(body.right - cornerRadiusPx - halfBase, body.right))
                 val center = tailOffsetPx.coerceIn(minimum, maximum)
-                val edgeY = if (tailEdge == TailEdge.TOP) body.top else body.bottom
+                val outlineEdgeY = if (tailEdge == TailEdge.TOP) body.top else body.bottom
+                val fillEdgeY = if (tailEdge == TailEdge.TOP) body.top + overlap else body.bottom - overlap
                 val pointY = if (tailEdge == TailEdge.TOP) bounds.top.toFloat() else bounds.bottom.toFloat()
-                tail.moveTo(center - halfBase, edgeY)
+                tail.moveTo(center - halfBase, fillEdgeY)
                 tail.lineTo(center, pointY)
-                tail.lineTo(center + halfBase, edgeY)
-                tailOutline.moveTo(center - halfBase, edgeY)
+                tail.lineTo(center + halfBase, fillEdgeY)
+                tail.close()
+                tailOutline.moveTo(center - halfBase, outlineEdgeY)
                 tailOutline.lineTo(center, pointY)
-                tailOutline.lineTo(center + halfBase, edgeY)
+                tailOutline.lineTo(center + halfBase, outlineEdgeY)
             }
         }
-        tail.close()
     }
 }

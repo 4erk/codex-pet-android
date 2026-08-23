@@ -5,6 +5,17 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val releaseKeystorePath = System.getenv("CODEX_PET_KEYSTORE_PATH")
+val releaseKeystorePassword = System.getenv("CODEX_PET_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("CODEX_PET_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("CODEX_PET_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseKeystorePath,
+    releaseKeystorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.fourerk.codexpet"
     compileSdk = 36
@@ -13,11 +24,26 @@ android {
         applicationId = "com.fourerk.codexpet"
         minSdk = 30
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0-beta1"
+        versionCode = 4
+        versionName = "0.4.0-beta1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(requireNotNull(releaseKeystorePath))
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
     }
 
     buildTypes {
@@ -32,6 +58,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
