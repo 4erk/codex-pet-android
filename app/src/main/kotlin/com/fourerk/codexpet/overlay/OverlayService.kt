@@ -204,12 +204,12 @@ class OverlayService : Service() {
     }
 
     companion object {
-        const val ACTION_START = "com.fourerk.codexpet.action.START_OVERLAY"
-        const val ACTION_HIDE = "com.fourerk.codexpet.action.HIDE_OVERLAY"
-        const val ACTION_SHOW = "com.fourerk.codexpet.action.SHOW_OVERLAY"
-        const val ACTION_TOGGLE_AUTO_BUBBLES = "com.fourerk.codexpet.action.TOGGLE_AUTO_BUBBLES"
-        const val ACTION_MORE_SPEECH = "com.fourerk.codexpet.action.MORE_SPEECH"
-        const val ACTION_PREVIEW_ANIMATION = "com.fourerk.codexpet.action.PREVIEW_ANIMATION"
+        const val ACTION_START = "com.mr4erk.codexpet.action.START_OVERLAY"
+        const val ACTION_HIDE = "com.mr4erk.codexpet.action.HIDE_OVERLAY"
+        const val ACTION_SHOW = "com.mr4erk.codexpet.action.SHOW_OVERLAY"
+        const val ACTION_TOGGLE_AUTO_BUBBLES = "com.mr4erk.codexpet.action.TOGGLE_AUTO_BUBBLES"
+        const val ACTION_MORE_SPEECH = "com.mr4erk.codexpet.action.MORE_SPEECH"
+        const val ACTION_PREVIEW_ANIMATION = "com.mr4erk.codexpet.action.PREVIEW_ANIMATION"
         const val EXTRA_ANIMATION_STATE = "animation_state"
         private const val CHANNEL_ID = "codex_pet_overlay"
         private const val NOTIFICATION_ID = 4101
