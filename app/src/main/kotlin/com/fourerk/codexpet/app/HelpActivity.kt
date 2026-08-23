@@ -18,77 +18,75 @@ class HelpActivity : AppCompatActivity() {
         val body = PetUi.page(
             this,
             "Помощь",
-            "Быстрые маршруты для восстановления работы и проверки конкретного слоя.",
+            "Быстрые проверки, если питомец, реплики или обновления работают не так, как ожидается.",
         )
 
-        body.addView(PetUi.card(this, "Как начать").apply {
-            addView(PetUi.text(
+        body.addView(PetUi.sectionTitle(this, "Первый запуск"))
+        body.addView(PetUi.card(this).apply {
+            addView(PetUi.helper(
                 this@HelpActivity,
-                "1. Разрешите чтение уведомлений и overlay.\n2. Оставьте обычные notifications ChatGPT включёнными.\n3. Запустите Codex Pet.\n4. Тап по реплике использует точный PendingIntent, если ChatGPT его передал.",
-                13f,
-                PetUi.MUTED,
+                "Разрешите доступ к уведомлениям, показ поверх окон и служебные уведомления Codex Pet. Обычные уведомления ChatGPT должны оставаться включёнными.",
             ))
-        }, PetUi.marginParams(this, 16))
+        }, PetUi.marginParams(this, 4))
 
-        body.addView(PetUi.card(this, "Если перестало обновляться").apply {
-            addView(PetUi.text(
-                this@HelpActivity,
-                "Listener теперь восстанавливается сам: проверяет heartbeat, activeNotifications и после повторных ошибок делает controlled rebind. Если нужно ускорить проверку — используйте действия ниже.",
-                13f,
-                PetUi.MUTED,
-            ))
-            addView(PetUi.primaryAction(this@HelpActivity, "Проверить activeNotifications") {
-                ChatGptNotificationListener.refresh(this@HelpActivity)
-            })
-            addView(PetUi.action(this@HelpActivity, "Перезапустить listener") {
-                ChatGptNotificationListener.restart(this@HelpActivity)
-            })
-            addView(PetUi.navigationRow(this@HelpActivity, "↗", "Открыть подключение", "Heartbeat, rebind и настройки MagicOS") {
-                startActivity(Intent(this@HelpActivity, IntegrationActivity::class.java))
-            })
-        }, PetUi.marginParams(this))
+        body.addView(PetUi.sectionTitle(this, "Не обновляется состояние"))
+        val connection = PetUi.card(this)
+        connection.addView(PetUi.primaryAction(this, "Проверить") {
+            ChatGptNotificationListener.refresh(this)
+        })
+        connection.addView(PetUi.action(this, "Переподключить") {
+            ChatGptNotificationListener.restart(this)
+        }, PetUi.marginParams(this, 8))
+        connection.addView(PetUi.navigationRow(this, "↗", "Подключение", "Состояние уведомлений и восстановление") {
+            startActivity(Intent(this, IntegrationActivity::class.java))
+        })
+        body.addView(connection, PetUi.marginParams(this, 4))
 
-        body.addView(PetUi.card(this, "Проверить внешний вид").apply {
-            addView(PetUi.navigationRow(this@HelpActivity, "◫", "Стенд 1–5 баблов", "Без реальных уведомлений") {
+        body.addView(PetUi.sectionTitle(this, "Проверка внешнего вида"))
+        body.addView(PetUi.card(this).apply {
+            addView(PetUi.navigationRow(this@HelpActivity, "▱", "Стенд", "1–5 баблов, короткая строка и края экрана") {
                 startActivity(Intent(this@HelpActivity, BubbleLabActivity::class.java))
             })
-            addView(PetUi.navigationRow(this@HelpActivity, "✦", "Все анимации", "Триггеры и ручной тест") {
+            PetUi.addDivider(this, this@HelpActivity)
+            addView(PetUi.navigationRow(this@HelpActivity, "✦", "Анимации", "Проверка каждого состояния") {
                 startActivity(Intent(this@HelpActivity, AnimationSettingsActivity::class.java))
             })
-        }, PetUi.marginParams(this))
+            PetUi.addDivider(this, this@HelpActivity)
+            addView(PetUi.navigationRow(this@HelpActivity, "◰", "Реплики", "Масштаб и правила показа") {
+                startActivity(Intent(this@HelpActivity, SpeechSettingsActivity::class.java))
+            })
+        }, PetUi.marginParams(this, 4))
 
-        body.addView(PetUi.card(this, "Обновления и сеть").apply {
-            addView(PetUi.text(
+        body.addView(PetUi.sectionTitle(this, "Обновления"))
+        body.addView(PetUi.card(this).apply {
+            addView(PetUi.helper(
                 this@HelpActivity,
-                "Основная работа пета остаётся локальной: notification-тексты не отправляются на сервер. INTERNET используется только для проверки публичного GitHub Releases API и скачивания stable APK. Перед установкой проверяются GitHub SHA-256, package name и сертификат подписи.",
-                13f,
-                PetUi.MUTED,
+                "Проверка новых версий обращается только к GitHub. Тексты уведомлений ChatGPT и содержимое задач туда не отправляются.",
             ))
-            addView(PetUi.navigationRow(this@HelpActivity, "⇩", "Обновления", "Stable channel и параметры автозагрузки") {
+            addView(PetUi.navigationRow(this@HelpActivity, "⇩", "Обновления", "Проверить, скачать или выбрать APK") {
                 startActivity(Intent(this@HelpActivity, UpdatesActivity::class.java))
             })
-        }, PetUi.marginParams(this))
+        }, PetUi.marginParams(this, 4))
 
-        body.addView(PetUi.sectionTitle(this, "Расширенное"))
-        body.addView(PetUi.card(this, "Диагностика").apply {
-            addView(PetUi.text(
-                this@HelpActivity,
-                "Для разбора конкретной версии ChatGPT/Android. Экспорт остаётся санитизированным; release-build не экспортирует полный текст уведомлений.",
-                12f,
-                PetUi.MUTED,
-            ))
-            addView(PetUi.action(this@HelpActivity, "Открыть диагностику уведомлений") {
+        body.addView(PetUi.sectionTitle(this, "Дополнительно"))
+        body.addView(PetUi.card(this).apply {
+            addView(PetUi.navigationRow(this@HelpActivity, "≡", "Диагностика", "Технические сведения об уведомлениях") {
                 startActivity(Intent(this@HelpActivity, DiagnosticsActivity::class.java))
             })
-            addView(PetUi.action(this@HelpActivity, "Сведения о приложении") {
+            PetUi.addDivider(this, this@HelpActivity)
+            addView(PetUi.navigationRow(this@HelpActivity, "i", "О приложении", "Системные настройки Codex Pet") {
                 SystemAccess.openAppDetails(this@HelpActivity)
             })
-        }, PetUi.marginParams(this, 8))
+        }, PetUi.marginParams(this, 4))
 
-        body.addView(PetUi.text(this, "Codex Pet ${BuildConfig.VERSION_NAME}", 12f, PetUi.MUTED).apply {
+        body.addView(PetUi.text(this, "Codex Pet ${BuildConfig.VERSION_NAME}", 11.5f, PetUi.MUTED).apply {
             setPadding(PetUi.dp(this@HelpActivity, 4), PetUi.dp(this@HelpActivity, 18), 0, 0)
         })
 
-        return ScrollView(this).apply { addView(body) }
+        return ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(body)
+        }
     }
 }
