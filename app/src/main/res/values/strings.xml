@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Codex Pet</string>
+    <string name="notification_listener_label">Доступ Codex Pet к уведомлениям</string>
+    <string name="overlay_channel_name">Плавающий питомец</string>
+    <string name="overlay_channel_description">Поддерживает прозрачного питомца поверх приложений</string>
+    <string name="overlay_notification_title">Codex Pet работает</string>
+    <string name="overlay_notification_text">Нажмите, чтобы открыть настройки</string>
+    <string name="hide_pet">Скрыть питомца</string>
+    <string name="open_chatgpt">Открыть ChatGPT</string>
+    <string name="settings">Настройки</string>
+    <string name="diagnostics">Diagnostics</string>
+    <string name="no_tasks">Активных задач в доступных уведомлениях нет</string>
+    <string name="all_tasks">Открыть все задачи в ChatGPT</string>
+    <string name="pet_size_format">Размер: %1$d dp</string>
+    <string name="animation_speed_format">Скорость анимации: %1$.2f×</string>
+    <plurals name="completed_visible_format">
+        <item quantity="one">Показывать завершённую задачу: %1$d секунду</item>
+        <item quantity="few">Показывать завершённую задачу: %1$d секунды</item>
+        <item quantity="many">Показывать завершённую задачу: %1$d секунд</item>
+        <item quantity="other">Показывать завершённую задачу: %1$d секунды</item>
+    </plurals>
+</resources>

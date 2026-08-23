@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="codex_green">#10A37F</color>
+    <color name="codex_background">#101214</color>
+    <color name="codex_surface">#1B1E21</color>
+</resources>

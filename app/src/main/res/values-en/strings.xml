@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Codex Pet</string>
+    <string name="notification_listener_label">Codex Pet notification access</string>
+    <string name="overlay_channel_name">Floating pet</string>
+    <string name="overlay_channel_description">Keeps the transparent pet visible over other apps</string>
+    <string name="overlay_notification_title">Codex Pet is running</string>
+    <string name="overlay_notification_text">Tap to open settings</string>
+    <string name="hide_pet">Hide pet</string>
+    <string name="open_chatgpt">Open ChatGPT</string>
+    <string name="settings">Settings</string>
+    <string name="diagnostics">Diagnostics</string>
+    <string name="no_tasks">No active tasks in available notifications</string>
+    <string name="all_tasks">Open all tasks in ChatGPT</string>
+    <string name="pet_size_format">Size: %1$d dp</string>
+    <string name="animation_speed_format">Animation speed: %1$.2f×</string>
+    <plurals name="completed_visible_format">
+        <item quantity="one">Show completed task: %1$d second</item>
+        <item quantity="other">Show completed task: %1$d seconds</item>
+    </plurals>
+</resources>
