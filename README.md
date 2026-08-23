@@ -87,7 +87,7 @@ Stable-build проверяет `https://api.github.com/repos/4erk/codex-pet-and
 
 Таким образом ручной путь не является произвольным APK installer: downgrade, переустановка той же версии и чужие APK отклоняются до системной установки.
 
-После любой проверки APK передаётся системному `PackageInstaller`. Защита Android не обходится: пользователь подтверждает установку, а при первом обновлении Android может попросить разрешить Codex Pet устанавливать обновления из этого источника. citeturn690270search0
+После любой проверки APK передаётся системному `PackageInstaller`. Защита Android не обходится: пользователь подтверждает установку, а при первом обновлении Android может попросить разрешить Codex Pet устанавливать обновления из этого источника.
 
 Debug-build намеренно не обновляется из GitHub stable поверх release application id. Локальный APK можно использовать для debug только если он относится к тому же debug package и подписан тем же debug key.
 
@@ -146,7 +146,7 @@ PR обязан пройти unit tests, lint, debug APK и minified release can
 3. создаёт `codex-pet-<version>.apk` + `.sha256`;
 4. публикует GitHub Release `v<version>`.
 
-GitHub REST Release Assets возвращает SHA-256 `digest`, который используется встроенным updater для проверки загруженного stable APK. citeturn690270search2
+GitHub REST Release Assets возвращает SHA-256 `digest`, который используется встроенным updater для проверки загруженного stable APK.
 
 ## HONOR / MagicOS
 
