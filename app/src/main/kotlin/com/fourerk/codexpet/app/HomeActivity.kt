@@ -85,12 +85,12 @@ class HomeActivity : AppCompatActivity() {
             SystemAccess.openNotificationListenerSettings(this)
         })
         PetUi.addDivider(setupCard, this)
-        setupCard.addView(PetUi.navigationRow(this, "◫", "Поверх окон", "Прозрачный pet overlay") {
+        setupCard.addView(PetUi.navigationRow(this, "◫", "Поверх окон", "Показ питомца поверх приложений") {
             SystemAccess.openOverlaySettings(this)
         })
         if (Build.VERSION.SDK_INT >= 33) {
             PetUi.addDivider(setupCard, this)
-            setupCard.addView(PetUi.navigationRow(this, "●", "Служебные", "Уведомление фоновой работы") {
+            setupCard.addView(PetUi.navigationRow(this, "●", "Служебные", "Уведомление о фоновой работе Codex Pet") {
                 notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             })
         }
@@ -101,18 +101,18 @@ class HomeActivity : AppCompatActivity() {
         liveStatus = PetUi.text(this, "Собираю состояние…", 12.5f, PetUi.MUTED)
         liveCard.addView(liveStatus)
         PetUi.addDivider(liveCard, this)
-        liveCard.addView(PetUi.navigationRow(this, "↗", "Подключение", "Listener, heartbeat и восстановление") {
+        liveCard.addView(PetUi.navigationRow(this, "↗", "Подключение", "Состояние уведомлений и восстановление") {
             startActivity(Intent(this, IntegrationActivity::class.java))
         })
         body.addView(liveCard, PetUi.marginParams(this, 4))
 
         body.addView(PetUi.sectionTitle(this, "Питомец"))
         body.addView(PetUi.card(this).apply {
-            addView(PetUi.navigationRow(this@HomeActivity, "◉", "Питомец", "Размер, pack и позиция") {
+            addView(PetUi.navigationRow(this@HomeActivity, "◉", "Питомец", "Размер, набор и положение") {
                 startActivity(Intent(this@HomeActivity, PetSettingsActivity::class.java))
             })
             PetUi.addDivider(this, this@HomeActivity)
-            addView(PetUi.navigationRow(this@HomeActivity, "◰", "Реплики", "Масштаб, preview и правила") {
+            addView(PetUi.navigationRow(this@HomeActivity, "◰", "Реплики", "Масштаб, предпросмотр и правила") {
                 startActivity(Intent(this@HomeActivity, SpeechSettingsActivity::class.java))
             })
             PetUi.addDivider(this, this@HomeActivity)
@@ -120,18 +120,18 @@ class HomeActivity : AppCompatActivity() {
                 startActivity(Intent(this@HomeActivity, AnimationSettingsActivity::class.java))
             })
             PetUi.addDivider(this, this@HomeActivity)
-            addView(PetUi.navigationRow(this@HomeActivity, "▱", "Стенд", "1–5 баблов и края экрана") {
+            addView(PetUi.navigationRow(this@HomeActivity, "▱", "Стенд", "1–5 реплик и края экрана") {
                 startActivity(Intent(this@HomeActivity, BubbleLabActivity::class.java))
             })
         }, PetUi.marginParams(this, 4))
 
         body.addView(PetUi.sectionTitle(this, "Система"))
         body.addView(PetUi.card(this).apply {
-            addView(PetUi.navigationRow(this@HomeActivity, "⌁", "Поведение", "Жесты, автозапуск и фон") {
+            addView(PetUi.navigationRow(this@HomeActivity, "⌁", "Поведение", "Жесты, автозапуск и работа в фоне") {
                 startActivity(Intent(this@HomeActivity, BehaviorActivity::class.java))
             })
             PetUi.addDivider(this, this@HomeActivity)
-            addView(PetUi.navigationRow(this@HomeActivity, "⇩", "Обновления", "GitHub, APK и stable-канал") {
+            addView(PetUi.navigationRow(this@HomeActivity, "⇩", "Обновления", "Проверка и установка новых версий") {
                 startActivity(Intent(this@HomeActivity, UpdatesActivity::class.java))
             })
             PetUi.addDivider(this, this@HomeActivity)
@@ -210,10 +210,10 @@ class HomeActivity : AppCompatActivity() {
                 it.animationCue == TaskAnimationCue.DISCONNECTED
         }
         liveStatus.text = buildString {
-            append(if (listener.connected) "Listener работает" else "Listener восстанавливается")
+            append(if (listener.connected) "Подключение работает" else "Подключение восстанавливается")
             listener.lastHeartbeatAt?.let {
                 val age = ((System.currentTimeMillis() - it) / 1_000L).coerceAtLeast(0L)
-                append(" · ${age}с")
+                append(" · ${age} с")
             }
             append("\n${listener.activeNotificationCount} уведомл. · ${codexTasks.size} задач")
             if (attention > 0) append(" · внимания: $attention")
