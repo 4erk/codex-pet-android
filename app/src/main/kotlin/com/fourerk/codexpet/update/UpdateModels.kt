@@ -61,18 +61,9 @@ object SemanticVersion {
 }
 
 object ReleaseAssetSelector {
-    fun select(assets: List<ReleaseAssetInfo>): ReleaseAssetInfo? = assets
-        .filter { it.name.endsWith(".apk", ignoreCase = true) }
-        .sortedWith(
-            compareBy<ReleaseAssetInfo> {
-                when {
-                    STABLE_NAME.matches(it.name) -> 0
-                    it.name.contains("release", ignoreCase = true) && !it.name.contains("debug", ignoreCase = true) -> 1
-                    else -> 2
-                }
-            }.thenByDescending(ReleaseAssetInfo::size),
-        )
-        .firstOrNull()
-
-    private val STABLE_NAME = Regex("codex-pet-[0-9]+(?:\\.[0-9]+){1,3}\\.apk", RegexOption.IGNORE_CASE)
+    /** Stable updater accepts only the deterministic asset name produced by the release workflow. */
+    fun select(assets: List<ReleaseAssetInfo>, version: String): ReleaseAssetInfo? {
+        val expected = "codex-pet-${version.removePrefix("v")}.apk"
+        return assets.firstOrNull { it.name.equals(expected, ignoreCase = true) }
+    }
 }
