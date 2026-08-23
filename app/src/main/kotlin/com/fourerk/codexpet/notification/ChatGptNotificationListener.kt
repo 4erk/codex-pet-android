@@ -21,8 +21,11 @@ import java.util.concurrent.atomic.AtomicLong
 class ChatGptNotificationListener : NotificationListenerService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val eventSequence = AtomicLong(0L)
+    private val scanSequence = AtomicLong(0L)
     private val latestEventByKey = ConcurrentHashMap<String, Long>()
     private var connected = false
+    private var rebindAttempt = 0
+    private var forcingReconnect = false
 
     private val reconcileRunnable = Runnable {
         if (connected) scanActive(
@@ -48,9 +51,19 @@ class ChatGptNotificationListener : NotificationListenerService() {
         }
     }
 
-    private val rebindRunnable = Runnable {
-        if (!connected) {
-            requestRebind(ComponentName(this, ChatGptNotificationListener::class.java))
+    private val rebindRunnable = object : Runnable {
+        override fun run() {
+            if (connected) return
+            rebindAttempt += 1
+            AppGraph.diagnostics.listenerRebindAttempt(rebindAttempt)
+            runCatching {
+                requestRebind(ComponentName(this@ChatGptNotificationListener, ChatGptNotificationListener::class.java))
+            }.onFailure {
+                AppGraph.diagnostics.error("listener requestRebind: ${it.javaClass.simpleName}")
+            }
+            if (!connected) {
+                mainHandler.postDelayed(this, ListenerRecoveryPolicy.delayMillis(rebindAttempt))
+            }
         }
     }
 
@@ -69,6 +82,8 @@ class ChatGptNotificationListener : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         connected = true
+        forcingReconnect = false
+        rebindAttempt = 0
         mainHandler.removeCallbacks(rebindRunnable)
         mainHandler.removeCallbacks(watchdogRunnable)
         scanActive(
@@ -86,8 +101,8 @@ class ChatGptNotificationListener : NotificationListenerService() {
         mainHandler.removeCallbacks(reconcileRunnable)
         mainHandler.removeCallbacks(watchdogRunnable)
         AppGraph.diagnostics.listenerDisconnected()
-        mainHandler.removeCallbacks(rebindRunnable)
-        mainHandler.postDelayed(rebindRunnable, REBIND_DELAY_MS)
+        scheduleRebind(resetAttempts = !forcingReconnect)
+        forcingReconnect = false
         super.onListenerDisconnected()
     }
 
@@ -105,8 +120,6 @@ class ChatGptNotificationListener : NotificationListenerService() {
     ) {
         if (!isConfiguredSource(sbn)) return
         markEvent(sbn.key)
-        // Removed StatusBarNotification is intentionally not parsed: Android documents it as a
-        // lightweight object. Reconcile against activeNotifications after the group settles.
         scheduleReconcile(REMOVED_RECONCILE_DELAY_MS)
     }
 
@@ -125,6 +138,23 @@ class ChatGptNotificationListener : NotificationListenerService() {
         mainHandler.postDelayed(reconcileRunnable, delayMs)
     }
 
+    private fun scheduleRebind(resetAttempts: Boolean) {
+        if (resetAttempts) rebindAttempt = 0
+        mainHandler.removeCallbacks(rebindRunnable)
+        mainHandler.postDelayed(rebindRunnable, ListenerRecoveryPolicy.delayMillis(rebindAttempt))
+    }
+
+    private fun forceReconnect(reason: String) {
+        if (forcingReconnect) return
+        forcingReconnect = true
+        connected = false
+        mainHandler.removeCallbacks(reconcileRunnable)
+        mainHandler.removeCallbacks(watchdogRunnable)
+        AppGraph.diagnostics.error("listener self-heal: $reason")
+        runCatching { requestUnbind() }
+        scheduleRebind(resetAttempts = true)
+    }
+
     private fun scanActive(
         event: String,
         inspectPet: Boolean,
@@ -132,13 +162,22 @@ class ChatGptNotificationListener : NotificationListenerService() {
         recordDiagnostics: Boolean,
         announceConnection: Boolean,
     ) {
-        val captured = runCatching { activeNotifications?.toList() ?: emptyList() }
-            .onFailure { AppGraph.diagnostics.error("getActiveNotifications: ${it.javaClass.simpleName}") }
-            .getOrNull()
-            ?: return
+        val captured = runCatching {
+            requireNotNull(activeNotifications) { "activeNotifications returned null" }.toList()
+        }.onFailure { error ->
+            val failures = AppGraph.diagnostics.listenerScanFailed(
+                "getActiveNotifications: ${error.javaClass.simpleName}",
+            )
+            if (ListenerRecoveryPolicy.shouldForceRebind(failures)) {
+                forceReconnect("$failures consecutive activeNotifications failures")
+            }
+        }.getOrNull() ?: return
+
         val sourcePackage = AppGraph.settings.settings.value.sourcePackage
         val matching = captured.filter { it.packageName == sourcePackage }
-        val snapshotSequence = eventSequence.get()
+        AppGraph.diagnostics.listenerHeartbeat(matching.size)
+        val snapshotEventSequence = eventSequence.get()
+        val thisScan = scanSequence.incrementAndGet()
 
         AppGraph.applicationScope.launch {
             val parsed = matching.mapNotNull { sbn ->
@@ -150,13 +189,15 @@ class ChatGptNotificationListener : NotificationListenerService() {
                     recordDiagnostics = recordDiagnostics,
                 )?.task
             }
-            // A new callback arrived while the snapshot was being parsed. Never let an older full
-            // snapshot overwrite newer live state; just schedule another settle pass.
-            if (snapshotSequence != eventSequence.get()) {
+            if (thisScan != scanSequence.get()) return@launch
+            if (snapshotEventSequence != eventSequence.get()) {
                 mainHandler.post { scheduleReconcile(POSTED_RECONCILE_DELAY_MS) }
                 return@launch
             }
-            AppGraph.tasks.replaceAll(NotificationSetReducer.reduce(parsed))
+            val reduced = NotificationSetReducer.reduce(parsed)
+            AppGraph.tasks.replaceAll(reduced)
+            val activeKeys = matching.mapTo(mutableSetOf()) { it.key }
+            latestEventByKey.keys.removeIf { it !in activeKeys }
             AppGraph.diagnostics.activeCount(matching.size)
             if (announceConnection) {
                 AppGraph.diagnostics.listenerConnected(sourcePackage, matching.size)
@@ -175,8 +216,6 @@ class ChatGptNotificationListener : NotificationListenerService() {
             ) ?: return@launch
             if (latestEventByKey[sbn.key] != sequence) return@launch
 
-            // Real child notifications update the UI immediately. Group summaries wait for the
-            // full snapshot so they cannot flash as a duplicate next to their children.
             if (!parsed.task.isGroupSummary) {
                 AppGraph.tasks.upsert(
                     parsed.task.copy(updatedAt = Instant.now()),
@@ -222,17 +261,24 @@ class ChatGptNotificationListener : NotificationListenerService() {
     private fun updateActiveCountOnly() {
         val sourcePackage = AppGraph.settings.settings.value.sourcePackage
         val count = runCatching {
-            activeNotifications.orEmpty().count { it.packageName == sourcePackage }
-        }.getOrDefault(AppGraph.diagnostics.listener.value.activeNotificationCount)
+            requireNotNull(activeNotifications).count { it.packageName == sourcePackage }
+        }.getOrElse { error ->
+            val failures = AppGraph.diagnostics.listenerScanFailed(
+                "active count: ${error.javaClass.simpleName}",
+            )
+            if (ListenerRecoveryPolicy.shouldForceRebind(failures)) {
+                mainHandler.post { forceReconnect("active count failed $failures times") }
+            }
+            AppGraph.diagnostics.listener.value.activeNotificationCount
+        }
         AppGraph.diagnostics.activeCount(count)
     }
 
     companion object {
         private const val POSTED_RECONCILE_DELAY_MS = 220L
-        private const val REMOVED_RECONCILE_DELAY_MS = 260L
-        private const val RANKING_RECONCILE_DELAY_MS = 350L
-        private const val WATCHDOG_INTERVAL_MS = 10_000L
-        private const val REBIND_DELAY_MS = 1_500L
+        private const val REMOVED_RECONCILE_DELAY_MS = 300L
+        private const val RANKING_RECONCILE_DELAY_MS = 400L
+        private const val WATCHDOG_INTERVAL_MS = 12_000L
 
         @Volatile
         private var instance: ChatGptNotificationListener? = null
@@ -252,13 +298,29 @@ class ChatGptNotificationListener : NotificationListenerService() {
             }
         }
 
+        fun ensureHealthy(context: Context) {
+            val listener = instance
+            if (listener != null && listener.connected) {
+                listener.scanActive(
+                    event = "HEALTH_CHECK",
+                    inspectPet = false,
+                    acceptPet = false,
+                    recordDiagnostics = false,
+                    announceConnection = false,
+                )
+            } else {
+                requestRebind(ComponentName(context, ChatGptNotificationListener::class.java))
+            }
+        }
+
         fun restart(context: Context) {
             val component = ComponentName(context, ChatGptNotificationListener::class.java)
-            instance?.let { listener ->
-                listener.connected = false
-                runCatching { listener.requestUnbind() }
+            val listener = instance
+            if (listener != null) {
+                listener.forceReconnect("manual restart")
+            } else {
+                requestRebind(component)
             }
-            Handler(Looper.getMainLooper()).postDelayed({ requestRebind(component) }, REBIND_DELAY_MS)
         }
     }
 }
