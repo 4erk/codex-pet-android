@@ -1,5 +1,6 @@
 package com.fourerk.codexpet.app
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.ImageView
@@ -48,13 +49,11 @@ class PetSettingsActivity : AppCompatActivity() {
     }
 
     private fun buildContent(): View {
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(PetUi.dp(this@PetSettingsActivity, 18), PetUi.dp(this@PetSettingsActivity, 20), PetUi.dp(this@PetSettingsActivity, 18), PetUi.dp(this@PetSettingsActivity, 36))
-            setBackgroundColor(PetUi.BACKGROUND)
-        }
-        body.addView(PetUi.text(this, "Питомец", 28f, PetUi.TEXT, bold = true))
-        body.addView(PetUi.text(this, "Внешность, размер и pet pack. Техническая диагностика отсюда убрана.", 14f, PetUi.MUTED))
+        val body = PetUi.page(
+            this,
+            "Питомец",
+            "Внешность, размер, позиция и полный анимационный pack.",
+        )
 
         val petCard = PetUi.card(this, "Violet Vixen").apply {
             preview = ImageView(this@PetSettingsActivity).apply {
@@ -64,7 +63,7 @@ class PetSettingsActivity : AppCompatActivity() {
             addView(preview, LinearLayout.LayoutParams.MATCH_PARENT, PetUi.dp(this@PetSettingsActivity, 190))
             sourceText = PetUi.text(this@PetSettingsActivity, "Загружаю…", 13f, PetUi.MUTED)
             addView(sourceText)
-            addView(PetUi.action(this@PetSettingsActivity, "Импортировать ZIP / PNG / WebP") {
+            addView(PetUi.primaryAction(this@PetSettingsActivity, "Импортировать ZIP / PNG / WebP") {
                 importPet.launch(
                     arrayOf(
                         "application/zip",
@@ -75,12 +74,12 @@ class PetSettingsActivity : AppCompatActivity() {
                     ),
                 )
             })
-            addView(PetUi.action(this@PetSettingsActivity, "Проверить питомца из ChatGPT") {
+            addView(PetUi.action(this@PetSettingsActivity, "Перепроверить питомца из ChatGPT") {
                 ChatGptNotificationListener.refresh(this@PetSettingsActivity)
             })
             addView(PetUi.text(
                 this@PetSettingsActivity,
-                "Для полной анимации лучше ZIP или spritesheet. Статичная картинка тоже поддерживается. Автоподхват из ChatGPT остаётся fallback и не заменяет полный pack одним случайным кадром.",
+                "Для полной реакции нужен ZIP/spritesheet. Автоподхват из notification icon остаётся fallback и не должен заменять полный pack одиночным случайным кадром.",
                 12f,
                 PetUi.MUTED,
             ))
@@ -90,20 +89,35 @@ class PetSettingsActivity : AppCompatActivity() {
         val sizeCard = PetUi.card(this, "На экране")
         sizeLabel = PetUi.text(this, "Размер: 72 dp", 14f, PetUi.TEXT, bold = true)
         sizeSeek = SeekBar(this).apply { max = 112 }
-        val snapRow = PetUi.toggle(this, "Прилипать к ближайшему краю", "После перетаскивания пет аккуратно уезжает к краю экрана.")
+        val snapRow = PetUi.toggle(this, "Прилипать к ближайшему краю", "Snap проигрывает бег в нужную сторону и не пересоздаёт реплики.")
         snapSwitch = PetUi.switchFrom(snapRow)
         sizeCard.addView(sizeLabel)
         sizeCard.addView(sizeSeek)
         sizeCard.addView(snapRow)
         body.addView(sizeCard, PetUi.marginParams(this))
 
-        body.addView(PetUi.card(this, "Подсказка").apply {
+        body.addView(PetUi.card(this, "Рядом с питомцем").apply {
+            addView(PetUi.navigationRow(this@PetSettingsActivity, "💬", "Реплики", "Размер и количество баблов независимы от размера пета") {
+                startActivity(Intent(this@PetSettingsActivity, SpeechSettingsActivity::class.java))
+            })
+            addView(PetUi.navigationRow(this@PetSettingsActivity, "✦", "Анимации", "Проверить все 9 состояний текущего pack") {
+                startActivity(Intent(this@PetSettingsActivity, AnimationSettingsActivity::class.java))
+            })
+            addView(PetUi.navigationRow(this@PetSettingsActivity, "◫", "Стенд баблов", "Потаскать пета с 1–5 репликами") {
+                startActivity(Intent(this@PetSettingsActivity, BubbleLabActivity::class.java))
+            })
+        }, PetUi.marginParams(this))
+
+        body.addView(PetUi.card(this, "Жесты").apply {
             addView(PetUi.text(
                 this@PetSettingsActivity,
-                "Нажатие на пета показывает его реплики. Долгое нажатие — быстрое меню. Перетаскивание не открывает чат и не мешает текущей анимации задачи после отпускания.",
+                "Тап — показать/скрыть реплики. Долгое нажатие — быстрое меню. Drag не открывает чат; после отпускания пет возвращается к фактическому состоянию задачи.",
                 13f,
                 PetUi.MUTED,
             ))
+            addView(PetUi.navigationRow(this@PetSettingsActivity, "⚙", "Настроить жесты", "Долгое нажатие и автозапуск") {
+                startActivity(Intent(this@PetSettingsActivity, BehaviorActivity::class.java))
+            })
         }, PetUi.marginParams(this))
 
         return ScrollView(this).apply { addView(body) }
