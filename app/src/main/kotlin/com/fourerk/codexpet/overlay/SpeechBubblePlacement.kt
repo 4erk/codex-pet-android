@@ -1,5 +1,7 @@
 package com.fourerk.codexpet.overlay
 
+import kotlin.math.roundToInt
+
 internal enum class BubbleAnchor {
     LEFT,
     RIGHT,
@@ -55,7 +57,7 @@ internal object SpeechBubblePlacement {
                 val targetY = if (bubbleHeights.size == 1) {
                     petY + petSize / 2
                 } else {
-                    petY + (((index + 1f) / (bubbleHeights.size + 1f)) * petSize).toInt()
+                    petY + (((index + 1f) / (bubbleHeights.size + 1f)) * petSize).roundToInt()
                 }
                 BubblePlacement(
                     x = x,
@@ -76,7 +78,7 @@ internal object SpeechBubblePlacement {
         var y = (if (useBelow) belowY else aboveY)
             .coerceIn(safe.top, (safe.bottom - totalHeight).coerceAtLeast(safe.top))
 
-        return bubbleHeights.mapIndexed { index, height ->
+        return bubbleHeights.mapIndexed { _, height ->
             BubblePlacement(
                 x = x,
                 y = y,
