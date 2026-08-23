@@ -16,7 +16,7 @@
     </queries>
 
     <application
-        android:name=".app.CodexPetApplication"
+        android:name="com.fourerk.codexpet.app.CodexPetApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -28,19 +28,19 @@
         android:theme="@style/Theme.CodexPet"
         android:usesCleartextTraffic="false">
 
-        <activity android:name=".app.DiagnosticsActivity" android:exported="false" />
-        <activity android:name=".app.MainActivity" android:exported="false" />
-        <activity android:name=".app.PetSettingsActivity" android:exported="false" />
-        <activity android:name=".app.SpeechSettingsActivity" android:exported="false" />
-        <activity android:name=".app.AnimationSettingsActivity" android:exported="false" />
-        <activity android:name=".app.IntegrationActivity" android:exported="false" />
-        <activity android:name=".app.BehaviorActivity" android:exported="false" />
-        <activity android:name=".app.UpdatesActivity" android:exported="false" />
-        <activity android:name=".app.BubbleLabActivity" android:exported="false" />
-        <activity android:name=".app.HelpActivity" android:exported="false" />
+        <activity android:name="com.fourerk.codexpet.app.DiagnosticsActivity" android:exported="false" />
+        <activity android:name="com.fourerk.codexpet.app.MainActivity" android:exported="false" />
+        <activity android:name="com.fourerk.codexpet.app.PetSettingsActivity" android:exported="false" />
+        <activity android:name="com.fourerk.codexpet.app.SpeechSettingsActivity" android:exported="false" />
+        <activity android:name="com.fourerk.codexpet.app.AnimationSettingsActivity" android:exported="false" />
+        <activity android:name="com.fourerk.codexpet.app.IntegrationActivity" android:exported="false" />
+        <activity android:name="com.fourerk.codexpet.app.BehaviorActivity" android:exported="false" />
+        <activity android:name="com.fourerk.codexpet.app.UpdatesActivity" android:exported="false" />
+        <activity android:name="com.fourerk.codexpet.app.BubbleLabActivity" android:exported="false" />
+        <activity android:name="com.fourerk.codexpet.app.HelpActivity" android:exported="false" />
 
         <activity
-            android:name=".app.HomeActivity"
+            android:name="com.fourerk.codexpet.app.HomeActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -49,7 +49,7 @@
         </activity>
 
         <service
-            android:name=".notification.ChatGptNotificationListener"
+            android:name="com.fourerk.codexpet.notification.ChatGptNotificationListener"
             android:exported="false"
             android:label="@string/notification_listener_label"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
@@ -62,7 +62,7 @@
         </service>
 
         <service
-            android:name=".overlay.OverlayService"
+            android:name="com.fourerk.codexpet.overlay.OverlayService"
             android:exported="false"
             android:foregroundServiceType="specialUse"
             tools:targetApi="34">
@@ -72,11 +72,11 @@
         </service>
 
         <receiver
-            android:name=".update.UpdateInstallReceiver"
+            android:name="com.fourerk.codexpet.update.UpdateInstallReceiver"
             android:exported="false" />
 
         <receiver
-            android:name=".system.BootReceiver"
+            android:name="com.fourerk.codexpet.system.BootReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
