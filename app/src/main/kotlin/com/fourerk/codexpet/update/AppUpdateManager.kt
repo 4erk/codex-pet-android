@@ -48,6 +48,8 @@ class AppUpdateManager(
     fun checkIfDue(force: Boolean = false) {
         scope.launch {
             mutex.withLock {
+                if (!force && downloadedFile?.isFile == true) return@withLock
+                if (!force && mutableState.value.phase in PROTECTED_UPDATE_PHASES) return@withLock
                 val currentSettings = settings.readCurrent()
                 if (!force && !currentSettings.autoUpdateEnabled) return@withLock
                 if (!force && System.currentTimeMillis() - currentSettings.lastUpdateCheckAt < CHECK_INTERVAL_MS) {
@@ -578,5 +580,11 @@ class AppUpdateManager(
         const val UPDATE_NOTIFICATION_ID = 5101
         val VERSION_PATTERN = Regex("[0-9]+(?:\\.[0-9]+){1,3}")
         val SHA256_DIGEST = Regex("sha256:[0-9a-fA-F]{64}")
+        val PROTECTED_UPDATE_PHASES = setOf(
+            UpdatePhase.VALIDATING_MANUAL,
+            UpdatePhase.READY_TO_INSTALL,
+            UpdatePhase.NEEDS_INSTALL_PERMISSION,
+            UpdatePhase.INSTALLING,
+        )
     }
 }
