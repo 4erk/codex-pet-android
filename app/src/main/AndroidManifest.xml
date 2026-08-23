@@ -25,12 +25,17 @@
         android:theme="@style/Theme.CodexPet"
         android:usesCleartextTraffic="false">
 
-        <activity
-            android:name=".app.DiagnosticsActivity"
-            android:exported="false" />
+        <activity android:name=".app.DiagnosticsActivity" android:exported="false" />
+        <activity android:name=".app.MainActivity" android:exported="false" />
+        <activity android:name=".app.PetSettingsActivity" android:exported="false" />
+        <activity android:name=".app.SpeechSettingsActivity" android:exported="false" />
+        <activity android:name=".app.AnimationSettingsActivity" android:exported="false" />
+        <activity android:name=".app.IntegrationActivity" android:exported="false" />
+        <activity android:name=".app.BehaviorActivity" android:exported="false" />
+        <activity android:name=".app.HelpActivity" android:exported="false" />
 
         <activity
-            android:name=".app.MainActivity"
+            android:name=".app.HomeActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
