@@ -44,6 +44,7 @@ class UpdatesActivity : AppCompatActivity() {
         super.onResume()
         AppGraph.updates.resumeInstallIfAllowed()
         AppGraph.updates.checkIfDue()
+        render()
     }
 
     private fun buildContent(): android.view.View {
@@ -190,7 +191,7 @@ class UpdatesActivity : AppCompatActivity() {
                 )
             }
             state.progressPercent?.let { append("\nЗагрузка: $it%") }
-            state.message?.let { append("\n$it") }
+            state.message?.let { append("\n${friendlyMessage(it)}") }
             state.checkedAt?.let {
                 append("\nПроверено: ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))}")
             }
@@ -214,11 +215,23 @@ class UpdatesActivity : AppCompatActivity() {
         )
         primaryButton.isEnabled = !busy
         manualApkButton.isEnabled = !busy
-        // In debug, UP_TO_DATE after a GitHub check means a stable installation is already present.
-        stableButton.visibility = if (BuildConfig.DEBUG && state.phase == UpdatePhase.UP_TO_DATE) {
+        stableButton.visibility = if (BuildConfig.DEBUG && isStableInstalled()) {
             android.view.View.VISIBLE
         } else {
             android.view.View.GONE
         }
+    }
+
+    private fun isStableInstalled(): Boolean =
+        packageManager.getLaunchIntentForPackage(PRODUCTION_APPLICATION_ID) != null
+
+    private fun friendlyMessage(message: String): String = when {
+        message.contains("GitHub HTTP 404", ignoreCase = true) ->
+            "На GitHub пока нет опубликованной стабильной версии"
+        else -> message
+    }
+
+    private companion object {
+        const val PRODUCTION_APPLICATION_ID = "com.mr4erk.codexpet"
     }
 }
